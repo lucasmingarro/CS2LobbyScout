@@ -1,0 +1,22 @@
+appId: com.easytech.cs2lobbyscout
+productName: CS2 Lobby Scout
+directories:
+  buildResources: resources
+  output: release
+files:
+  - out/**
+  - package.json
+  - '!**/*.map'
+asarUnpack:
+  - node_modules/better-sqlite3/**
+npmRebuild: true
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  executableName: CS2-Lobby-Scout
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  shortcutName: CS2 Lobby Scout
+publish: null
