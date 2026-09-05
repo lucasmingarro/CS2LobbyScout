@@ -106,10 +106,18 @@ describe('FaceitClient', () => {
     return vi.fn(async (url: string, init?: RequestInit) => {
       expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer FKEY')
       if (url.includes('/players?game=cs2&game_player_id=')) return notFound ? json({ errors: [{ message: 'not found' }] }, 404) : json(player)
+      if (url.includes('/search/players?nickname=')) {
+        const nick = decodeURIComponent(url.split('nickname=')[1].split('&')[0]).toLowerCase()
+        if (nick === 'aimexe' && !notFound) return json({ items: [{ player_id: 'f-1', nickname: 'aimexe' }, { player_id: 'f-9', nickname: 'aimexe2' }] })
+        if (nick === 'dupe') return json({ items: [{ player_id: 'a', nickname: 'Dupe' }, { player_id: 'b', nickname: 'dupe' }] })
+        return json({ items: [] })
+      }
       if (url.includes('/players?nickname=')) {
         const nick = decodeURIComponent(url.split('nickname=')[1])
-        return nick.toLowerCase() === 'aimexe' && !notFound ? json(player) : json({ errors: [{ message: 'not found' }] }, 404)
+        // exact endpoint is case sensitive
+        return nick === 'aimexe' && !notFound ? json(player) : json({ errors: [{ message: 'not found' }] }, 404)
       }
+      if (url.endsWith('/players/f-1')) return json(player)
       if (url.endsWith('/players/f-1/stats/cs2')) return json(stats)
       if (url.includes('/players/f-1/games/cs2/stats')) return json(recent)
       return json({}, 404)
@@ -153,9 +161,22 @@ describe('FaceitClient', () => {
     const miss = await client.lookupByNickname('someone else')
     expect(miss.status).toBe('not_found')
     expect(miss.steamId).toBeUndefined()
-    // cached negative lookup
+    // cached negative lookup (exact + search endpoints, once each)
     await client.lookupByNickname('someone else')
-    expect(fetchImpl.mock.calls.filter((c) => String(c[0]).includes('someone')).length).toBe(1)
+    expect(fetchImpl.mock.calls.filter((c) => String(c[0]).includes('someone')).length).toBe(2)
+  })
+
+  it('falls back to the case-insensitive search when the exact endpoint misses', async () => {
+    const fetchImpl = makeFetch()
+    const client = new FaceitClient(new RequestManager({ fetchImpl: fetchImpl as unknown as typeof fetch }), new MemoryCache(), () => 'FKEY')
+    const r = await client.lookupByNickname('AIMEXE')
+    expect(r.status).toBe('ok')
+    expect(r.steamId).toBe('76561197961500295')
+    expect(fetchImpl.mock.calls.some((c) => String(c[0]).includes('/search/players'))).toBe(true)
+    expect(fetchImpl.mock.calls.some((c) => String(c[0]).endsWith('/players/f-1'))).toBe(true)
+
+    // ambiguous: two accounts differing only by case -> not resolved
+    expect((await client.lookupByNickname('dupe')).status).toBe('not_found')
   })
 
   it('returns not_found (and caches it) when no FACEIT account exists', async () => {

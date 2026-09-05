@@ -25,6 +25,10 @@ interface FaceitRecentStats {
   items?: Array<{ stats: Record<string, string> }>
 }
 
+interface FaceitSearchResult {
+  items?: Array<{ player_id: string; nickname: string; games?: Array<{ name: string }> }>
+}
+
 type CachedProfile = { notFound: true } | { notFound: false; player: FaceitPlayer }
 
 export type FaceitLookupStatus = 'ok' | 'not_found' | 'unavailable'
@@ -97,12 +101,53 @@ export class FaceitClient {
       logger.warn('faceit.nick_failed', { nickname: nick, error: (err as Error).message })
       return { status: 'unavailable' }
     }
-    if (profile.notFound) return { status: 'not_found' }
-    const p = profile.player
-    if (p.nickname.toLowerCase() !== nick.toLowerCase()) return { status: 'not_found' }
+    let p: FaceitPlayer | undefined = profile.notFound ? undefined : profile.player
+    if (p && p.nickname.toLowerCase() !== nick.toLowerCase()) p = undefined
+    if (!p) {
+      // The exact endpoint is case sensitive; fall back to the search endpoint and
+      // accept a single case-insensitive exact match.
+      try {
+        p = await this.searchExact(nick, key, options.bypassCache)
+      } catch (err) {
+        logger.warn('faceit.search_failed', { nickname: nick, error: (err as Error).message })
+        return { status: 'unavailable' }
+      }
+    }
+    if (!p) return { status: 'not_found' }
     const steamId = p.games?.[GAME]?.game_player_id
     if (!steamId || !/^7656119\d{10}$/.test(steamId)) return { status: 'not_found' }
     return { status: 'ok', steamId, info: await this.enrich(p, key, options.bypassCache) }
+  }
+
+  /** Search players by nickname and return the unique case-insensitive exact match, if any. */
+  private async searchExact(nick: string, key: string, bypass?: boolean): Promise<FaceitPlayer | undefined> {
+    const cacheKey = `faceit:search:${nick.toLowerCase()}`
+    if (!bypass) {
+      const cached = this.cache.get<CachedProfile>(cacheKey)
+      if (cached) return cached.notFound ? undefined : cached.player
+    }
+    const url = `${API}/search/players?nickname=${encodeURIComponent(nick)}&game=${GAME}&offset=0&limit=20`
+    let result: FaceitSearchResult
+    try {
+      result = await this.rm.getJson<FaceitSearchResult>(cacheKey, url, { headers: this.headers(key) })
+    } catch (err) {
+      if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'bad_request')) result = { items: [] }
+      else throw err
+    }
+    const matches = (result.items ?? []).filter((it) => it.nickname.toLowerCase() === nick.toLowerCase())
+    if (matches.length !== 1) {
+      this.cache.set(cacheKey, { notFound: true } satisfies CachedProfile, TTL.faceitNotFound)
+      if (matches.length > 1) logger.debug('faceit.search_ambiguous', { nickname: nick, count: matches.length })
+      return undefined
+    }
+    // The search result lacks game ids; load the full player object.
+    const full = await this.profile(`faceit:player:${matches[0].player_id}`, `${API}/players/${matches[0].player_id}`, key, bypass)
+    if (full.notFound) {
+      this.cache.set(cacheKey, { notFound: true } satisfies CachedProfile, TTL.faceitNotFound)
+      return undefined
+    }
+    this.cache.set(cacheKey, full, TTL.faceitProfile)
+    return full.player
   }
 
   private async enrich(p: FaceitPlayer, key: string, bypassCache?: boolean): Promise<FaceitInfo> {
