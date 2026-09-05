@@ -41,6 +41,7 @@ export const sourceLabel: Record<SourceStatus, string> = {
 export const identityLabel: Record<IdentitySource, string> = {
   status: 'Steam ID from status',
   faceit_name: 'matched by FACEIT nickname (unverified)',
+  steam_history: 'from your Steam match history',
   self: 'you (configured Steam ID)',
   none: 'Steam ID unknown'
 }
