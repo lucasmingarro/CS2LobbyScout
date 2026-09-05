@@ -1,4 +1,4 @@
-import type { IdentitySource, LobbySession, ScoutPlayer, Team } from '@shared/types'
+import type { IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team } from '@shared/types'
 import { parseStatus } from '@shared/lobby-parser'
 import { computeScore, ENGINE_VERSION } from '@shared/scout-engine'
 import { IPC } from '@shared/ipc'
@@ -6,7 +6,7 @@ import type { Repositories } from '../db/repositories'
 import type { ConfigStore } from '../config'
 import type { SteamClient } from './steam-client'
 import type { FaceitClient } from './faceit-client'
-import type { LeetifyClient } from './leetify-client'
+import { toImportedMatch, type LeetifyClient } from './leetify-client'
 import { errorFields, logger } from '../logger'
 
 export type Emitter = (channel: string, payload: unknown) => void
@@ -14,10 +14,11 @@ export type Emitter = (channel: string, payload: unknown) => void
 interface ActiveSession {
   id?: number
   createdAt: string
-  source: 'paste' | 'clipboard'
+  source: 'paste' | 'clipboard' | 'steam_history'
   rawHash: string
   officialServer: boolean
   map?: string
+  match?: MatchSummary
   saveHistory: boolean
   players: Map<string, ScoutPlayer>
 }
@@ -60,6 +61,7 @@ export class ScoutService {
       source: s.source,
       officialServer: s.officialServer,
       map: s.map,
+      match: s.match,
       players: [...s.players.values()]
     }
   }
@@ -310,5 +312,131 @@ export class ScoutService {
     }
     logger.info(watched ? 'player.watch' : 'player.unwatch', { steamId })
     return watched
+  }
+
+  // ---- Leetify match import ------------------------------------------------------
+
+  /**
+   * Pulls the newest Valve matches of the configured Steam account from Leetify,
+   * stores them, and back-fills the live lobby (names -> exact Steam64 + team).
+   */
+  async importLastMatches(limit = 3): Promise<ImportResult> {
+    const settings = this.config.getSettings()
+    const mySteamId = settings.mySteamId
+    const result: ImportResult = { imported: 0, skipped: 0, pages: 0, backfilled: 0 }
+    if (!mySteamId) return { ...result, error: 'Set your Steam64 ID in Settings first.' }
+
+    const prof = await this.leetify.profile(mySteamId, { bypassCache: true })
+    if (prof.status !== 'ok' || !prof.raw) return { ...result, error: 'Your Leetify profile is not available. Sign in at leetify.com with Steam and add the Steam match authentication code.' }
+    const recent = (prof.raw.recent_matches ?? []).filter((m) => !m.data_source || m.data_source === 'matchmaking').slice(0, Math.max(1, Math.min(10, limit)))
+    if (recent.length === 0) return { ...result, error: 'Leetify has no matchmaking matches for your account yet.' }
+    result.pages = 1
+
+    const imported: ImportedMatch[] = []
+    for (const rm of recent) {
+      if (this.repos.hasMatch(rm.id)) {
+        result.skipped++
+        continue
+      }
+      const raw = await this.leetify.match(rm.id)
+      if (!raw) {
+        result.error = 'Leetify match details are not reachable right now.'
+        continue
+      }
+      const match = toImportedMatch(raw, rm.id, mySteamId, rm)
+      if (!match) continue
+      if (this.repos.insertMatch(match, settings.saveEncounterHistory)) {
+        result.imported++
+        imported.push(match)
+      } else result.skipped++
+    }
+    logger.info('leetify.import', { imported: result.imported, skipped: result.skipped })
+
+    // Back-fill the live lobby from the newest match (imported now or already stored).
+    const newest = imported[0] ?? (recent[0] ? this.repos.getMatch(recent[0].id) : undefined)
+    if (newest) result.backfilled = await this.backfillFromMatch(newest)
+    return result
+  }
+
+  /** Match live name-only players against an imported match and enrich them. */
+  private async backfillFromMatch(match: ImportedMatch): Promise<number> {
+    const session = this.session
+    if (!session || session.source === 'steam_history') return 0
+    const byName = new Map(match.players.map((p) => [p.name.trim().toLowerCase(), p]))
+    const filled: ScoutPlayer[] = []
+    for (const player of session.players.values()) {
+      const mp = byName.get(player.name.trim().toLowerCase())
+      if (!mp) continue
+      const changed = player.steamId !== mp.steamId
+      if (player.identity === 'status' && !changed) continue
+      player.steamId = mp.steamId
+      player.identity = mp.steamId === this.config.getSettings().mySteamId ? 'self' : 'leetify_match'
+      player.team = mp.team !== 'unknown' ? mp.team : player.team
+      player.matchStats = mp.stats
+      if (changed) {
+        player.faceit = undefined
+        player.steam = undefined
+        player.valve = undefined
+        player.sources.faceit = this.faceit.hasKey() ? 'pending' : 'no_key'
+        player.sources.steam = this.steam.hasKey() ? 'pending' : 'no_key'
+        player.sources.valve = 'pending'
+        this.registerIdentified(session, player)
+        filled.push(player)
+      }
+      this.pushUpdate(session, player)
+    }
+    if (filled.length) {
+      logger.info('lobby.backfill', { players: filled.length, matchId: match.matchId })
+      await this.enrichAll(session, filled.map((p) => p.key), false)
+    }
+    return filled.length
+  }
+
+  listMatches(): MatchSummary[] {
+    return this.repos.listMatches(100)
+  }
+
+  /** Shows a stored match as a lobby session (exact teams and per-match stats). */
+  openMatch(matchId: string): LobbySession | undefined {
+    const match = this.repos.getMatch(matchId)
+    if (!match) return undefined
+    const mySteamId = this.config.getSettings().mySteamId
+    const players = new Map<string, ScoutPlayer>()
+    for (const mp of match.players) {
+      players.set(mp.steamId, {
+        key: mp.steamId,
+        steamId: mp.steamId,
+        identity: mp.steamId === mySteamId ? 'self' : 'leetify_match',
+        name: mp.name,
+        avatarUrl: mp.avatarUrl,
+        team: mp.team,
+        isLocal: mp.steamId === mySteamId,
+        matchStats: mp.stats,
+        scout: computeScore({}),
+        history: this.repos.history(mp.steamId),
+        sources: {
+          steam: this.steam.hasKey() ? 'pending' : 'no_key',
+          faceit: this.faceit.hasKey() ? 'pending' : 'no_key',
+          valve: 'pending',
+          history: 'ok'
+        },
+        watched: this.repos.isWatched(mp.steamId)
+      })
+    }
+    const { players: _p, ...summary } = match
+    const session: ActiveSession = {
+      createdAt: new Date().toISOString(),
+      source: 'steam_history',
+      rawHash: `match:${matchId}`,
+      officialServer: true,
+      map: match.map,
+      match: { ...summary, playerCount: _p.length },
+      saveHistory: false,
+      players
+    }
+    this.session = session
+    const snapshot = this.toLobbySession(session)
+    void this.enrichAll(session, [...players.keys()], false)
+    return snapshot
   }
 }

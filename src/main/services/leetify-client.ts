@@ -52,12 +52,18 @@ export interface LeetifyRecentMatch {
 export interface LeetifyMatch {
   id?: string
   finished_at?: string
+  finishedAt?: string
   map_name?: string
+  mapName?: string
   data_source?: string
+  dataSource?: string
   rank_type?: number
-  team_scores?: Array<{ team_number?: number; score?: number }>
+  rankType?: number
+  team_scores?: Array<{ team_number?: number; teamNumber?: number; score?: number }>
+  teamScores?: Array<{ team_number?: number; teamNumber?: number; score?: number }>
   stats?: LeetifyMatchPlayer[]
   players?: LeetifyMatchPlayer[]
+  playerStats?: LeetifyMatchPlayer[]
   [k: string]: unknown
 }
 
@@ -125,23 +131,42 @@ export class LeetifyClient {
     return { status: 'ok', raw, info: toValveInfo(raw, steamId) }
   }
 
+  /**
+   * The match endpoint is not documented; try the known candidates in order and
+   * remember the one that answers. Finished matches never change, so results are
+   * cached for a long time.
+   */
   async match(matchId: string, options: { bypassCache?: boolean } = {}): Promise<LeetifyMatch | undefined> {
     const cacheKey = `leetify:match:${matchId}`
     if (!options.bypassCache) {
       const cached = this.cache.get<LeetifyMatch>(cacheKey)
       if (cached) return cached
     }
-    try {
-      const data = await this.rm.getJson<LeetifyMatch>(cacheKey, `${API}/matches/${encodeURIComponent(matchId)}`, {
-        headers: { Accept: 'application/json' }
-      })
-      // finished matches never change
-      this.cache.set(cacheKey, data, TTL.steamGames * 30)
-      return data
-    } catch (err) {
-      logger.warn('leetify.match_failed', { matchId, error: (err as Error).message })
-      return undefined
+    const id = encodeURIComponent(matchId)
+    const candidates = [
+      `${API}/matches/${id}`,
+      `${API}/matches?id=${id}`,
+      `${API}/match?id=${id}`,
+      `${API}/match/${id}`,
+      `https://api.leetify.com/api/games/${id}`
+    ]
+    const preferred = this.cache.get<{ url: string }>('leetify:match-endpoint')?.url
+    if (preferred) candidates.sort((a, b) => (a.startsWith(preferred) ? -1 : b.startsWith(preferred) ? 1 : 0))
+    for (const url of candidates) {
+      try {
+        const data = await this.rm.getJson<LeetifyMatch>(`${cacheKey}:${url}`, url, { headers: { Accept: 'application/json' } })
+        if (!data || typeof data !== 'object') continue
+        const rows = (data.stats ?? data.players ?? (data as { playerStats?: unknown[] }).playerStats) as unknown[] | undefined
+        if (!Array.isArray(rows) || rows.length === 0) continue
+        this.cache.set(cacheKey, data, TTL.steamGames * 30)
+        this.cache.set('leetify:match-endpoint', { url: url.split(id)[0] }, TTL.steamGames * 30)
+        return data
+      } catch (err) {
+        logger.debug('leetify.match_candidate_failed', { url: url.split('?')[0], error: (err as Error).message })
+      }
     }
+    logger.warn('leetify.match_failed', { matchId })
+    return undefined
   }
 }
 
@@ -196,12 +221,16 @@ export function modeFromRankType(rankType: number | undefined): MatchMode {
  * relative to `mySteamId`; when the payload has no usable players it returns undefined.
  */
 export function toImportedMatch(m: LeetifyMatch, matchId: string, mySteamId: string | undefined, fallback?: LeetifyRecentMatch): ImportedMatch | undefined {
-  const rows: LeetifyMatchPlayer[] = (m.stats ?? m.players ?? []) as LeetifyMatchPlayer[]
+  const rows: LeetifyMatchPlayer[] = (m.stats ?? m.players ?? m.playerStats ?? []) as LeetifyMatchPlayer[]
+  const g = (row: LeetifyMatchPlayer, ...keys: string[]): unknown => {
+    for (const k of keys) if (row[k] !== undefined && row[k] !== null) return row[k]
+    return undefined
+  }
   const players = rows
     .map((row) => {
-      const steamId = String(row.steam64_id ?? row.steamId ?? '')
+      const steamId = String(g(row, 'steam64_id', 'steam64Id', 'steamId', 'steam_id') ?? '')
       if (!/^7656119\d{10}$/.test(steamId)) return undefined
-      const teamNo = num(row.initial_team_number ?? row.team_number ?? row.team)
+      const teamNo = num(g(row, 'initial_team_number', 'initialTeamNumber', 'team_number', 'teamNumber', 'team'))
       return { steamId, name: String(row.name ?? steamId), teamNo, row }
     })
     .filter((x): x is { steamId: string; name: string; teamNo: number | undefined; row: LeetifyMatchPlayer } => !!x)
@@ -214,33 +243,34 @@ export function toImportedMatch(m: LeetifyMatch, matchId: string, mySteamId: str
     return teamNo === myTeamNo ? 'mine' : 'enemy'
   }
   const out: ImportedMatchPlayer[] = players.map((p) => {
-    const kills = num(p.row.total_kills ?? p.row.kills) ?? 0
-    const deaths = num(p.row.total_deaths ?? p.row.deaths) ?? 0
-    const hsKills = num(p.row.total_hs_kills)
+    const kills = num(g(p.row, 'total_kills', 'totalKills', 'kills')) ?? 0
+    const deaths = num(g(p.row, 'total_deaths', 'totalDeaths', 'deaths')) ?? 0
+    const hsKills = num(g(p.row, 'total_hs_kills', 'totalHsKills'))
     return {
       steamId: p.steamId,
       name: p.name,
       team: teamOf(p.teamNo),
       stats: {
         kills,
-        assists: num(p.row.total_assists ?? p.row.assists) ?? 0,
+        assists: num(g(p.row, 'total_assists', 'totalAssists', 'assists')) ?? 0,
         deaths,
-        mvps: num(p.row.mvps) ?? 0,
-        headshotPercentage: num(p.row.hs_percentage) ?? (hsKills !== undefined && kills > 0 ? Math.round((hsKills / kills) * 100) : undefined),
-        score: num(p.row.score) ?? 0,
-        adr: num(p.row.dpr ?? p.row.adr),
-        premierRating: num(p.row.rank),
-        leetifyRating: num(p.row.leetify_rating)
+        mvps: num(g(p.row, 'mvps', 'total_mvps', 'totalMvps')) ?? 0,
+        headshotPercentage: num(g(p.row, 'hs_percentage', 'hsPercentage')) ?? (hsKills !== undefined && kills > 0 ? Math.round((hsKills / kills) * 100) : undefined),
+        score: num(g(p.row, 'score', 'total_score', 'totalScore')) ?? 0,
+        adr: num(g(p.row, 'dpr', 'adr', 'total_damage_per_round')),
+        premierRating: num(g(p.row, 'rank', 'premier_rating', 'skillLevel')),
+        leetifyRating: num(g(p.row, 'leetify_rating', 'leetifyRating'))
       }
     }
   })
 
-  // Scores: prefer team_scores, else the profile's recent match score (already my-team-first).
+  // Scores: prefer team scores, else the profile's recent match score (already my-team-first).
   let myScore: number | undefined
   let theirScore: number | undefined
-  if (Array.isArray(m.team_scores) && m.team_scores.length >= 2 && myTeamNo !== undefined) {
-    const mine = m.team_scores.find((t) => num(t.team_number) === myTeamNo)
-    const theirs = m.team_scores.find((t) => num(t.team_number) !== myTeamNo)
+  const teamScores = m.team_scores ?? m.teamScores
+  if (Array.isArray(teamScores) && teamScores.length >= 2 && myTeamNo !== undefined) {
+    const mine = teamScores.find((t) => num(t.team_number ?? t.teamNumber) === myTeamNo)
+    const theirs = teamScores.find((t) => num(t.team_number ?? t.teamNumber) !== myTeamNo)
     myScore = num(mine?.score)
     theirScore = num(theirs?.score)
   } else if (fallback?.score) {
@@ -252,9 +282,9 @@ export function toImportedMatch(m: LeetifyMatch, matchId: string, mySteamId: str
 
   return {
     matchId,
-    mode: modeFromRankType(num(m.rank_type) ?? fallback?.rank_type),
-    map: (m.map_name as string | undefined) ?? fallback?.map_name,
-    playedAt: (m.finished_at as string | undefined) ?? fallback?.finished_at ?? new Date().toISOString(),
+    mode: modeFromRankType(num(m.rank_type ?? m.rankType) ?? fallback?.rank_type),
+    map: (m.map_name ?? m.mapName) ?? fallback?.map_name,
+    playedAt: (m.finished_at ?? m.finishedAt) ?? fallback?.finished_at ?? new Date().toISOString(),
     myScore,
     theirScore,
     result,

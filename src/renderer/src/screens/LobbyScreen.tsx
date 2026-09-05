@@ -10,6 +10,7 @@ interface Props {
   loading: boolean
   error?: string
   onLoad: (raw: string) => Promise<void>
+  onImport: () => Promise<string | undefined>
   onSelect: (steamId: string) => void
   onSetTeam: (steamId: string, team: Team) => void
 }
@@ -31,9 +32,21 @@ function groupPlayers(players: ScoutPlayer[]): Group[] {
   return groups.filter((g) => g.players.length > 0)
 }
 
-export function LobbyScreen({ session, players, selectedId, showScore, loading, error, onLoad, onSelect, onSetTeam }: Props): JSX.Element {
+export function LobbyScreen({ session, players, selectedId, showScore, loading, error, onLoad, onImport, onSelect, onSetTeam }: Props): JSX.Element {
   const [raw, setRaw] = useState('')
   const [open, setOpen] = useState(players.length === 0)
+  const [importing, setImporting] = useState(false)
+  const [importMsg, setImportMsg] = useState<string | undefined>()
+
+  const doImport = async (): Promise<void> => {
+    setImporting(true)
+    setImportMsg(undefined)
+    try {
+      setImportMsg(await onImport())
+    } finally {
+      setImporting(false)
+    }
+  }
 
   const submit = async (): Promise<void> => {
     if (!raw.trim()) return
@@ -65,6 +78,9 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
           <button className="btn" onClick={() => setOpen((o) => !o)}>
             {open ? 'Hide text box' : 'Paste manually'}
           </button>
+          <button className="btn" onClick={doImport} disabled={importing} title="Identify the players of your last Valve match through Leetify">
+            {importing ? 'Importing…' : 'Import last match'}
+          </button>
           <span className="hint">
             In CS2 open the console (<code>~</code>), run <code>status</code>, select the output and copy it.
           </span>
@@ -88,9 +104,16 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
           </>
         )}
         {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
+        {importMsg && <div className="dim">{importMsg}</div>}
       </div>
 
-      {session?.officialServer && players.length > 0 && (
+      {session?.match && (
+        <div className="notice">
+          <b>Imported match</b> · {session.match.mode} on {session.match.map ?? '?'} · {session.match.myScore ?? '–'} : {session.match.theirScore ?? '–'} (
+          {session.match.result ?? 'unknown'}). Teams and per-match K/D come from the match itself.
+        </div>
+      )}
+      {session?.officialServer && !session.match && players.length > 0 && (
         <div className="notice">
           <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
           exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with

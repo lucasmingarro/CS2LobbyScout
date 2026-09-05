@@ -103,6 +103,13 @@ export function PlayerTable({ players, selectedId, showScore, map, onSelect, onC
                         {p.steamId ?? (faceitStatus === 'pending' ? 'resolving…' : 'Steam ID hidden by server')}
                         {p.steam?.cs2Hours !== undefined && <span className="faint"> · {fmtInt(p.steam.cs2Hours)} h</span>}
                       </div>
+                      {p.matchStats && (
+                        <div className="player-sub mono" title="This match: kills / assists / deaths · ADR · HS%">
+                          {p.matchStats.kills}/{p.matchStats.assists}/{p.matchStats.deaths}
+                          {p.matchStats.adr !== undefined ? ` · ${fmtInt(p.matchStats.adr)} ADR` : ''}
+                          {p.matchStats.headshotPercentage !== undefined ? ` · ${fmtInt(p.matchStats.headshotPercentage)}% HS` : ''}
+                        </div>
+                      )}
                     </div>
                   </div>
                 </td>
