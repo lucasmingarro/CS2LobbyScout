@@ -215,9 +215,20 @@ export interface MatchPlayerStats {
   score: number
   ping?: number
   adr?: number
-  /** Premier rating at the time of the match, when known. */
+  /** Premier rating at the time of the match, when known (0 = unranked). */
   premierRating?: number
+  /** Premier rating before this match. */
+  premierRatingBefore?: number
+  /** Premier wins counted by Valve at that time. */
+  premierWins?: number
+  /** Leetify rating for this match, in %. */
   leetifyRating?: number
+  /** Per-match aim metrics. */
+  preaim?: number
+  reactionTimeMs?: number
+  headshotAccuracy?: number
+  /** Party index inside the lobby: players sharing a number queued together. */
+  party?: number
 }
 
 export type MatchMode = 'competitive' | 'premier' | 'wingman' | 'other'
@@ -235,6 +246,8 @@ export interface ImportedMatch {
   theirScore?: number
   result?: 'win' | 'loss' | 'tie' | 'unknown'
   players: ImportedMatchPlayer[]
+  serverName?: string
+  hasBannedPlayer?: boolean
 }
 
 export interface ImportedMatchPlayer {

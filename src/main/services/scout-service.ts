@@ -326,10 +326,11 @@ export class ScoutService {
     const result: ImportResult = { imported: 0, skipped: 0, pages: 0, backfilled: 0 }
     if (!mySteamId) return { ...result, error: 'Set your Steam64 ID in Settings first.' }
 
-    const prof = await this.leetify.profile(mySteamId, { bypassCache: true })
-    if (prof.status !== 'ok' || !prof.raw) return { ...result, error: 'Your Leetify profile is not available. Sign in at leetify.com with Steam and add the Steam match authentication code.' }
-    const recent = (prof.raw.recent_matches ?? []).filter((m) => !m.data_source || m.data_source === 'matchmaking').slice(0, Math.max(1, Math.min(10, limit)))
-    if (recent.length === 0) return { ...result, error: 'Leetify has no matchmaking matches for your account yet.' }
+    const all = await this.leetify.profileMatches(mySteamId, { bypassCache: true })
+    if (all.length === 0) {
+      return { ...result, error: 'Leetify has no Valve matches for your account yet. Make sure you signed in at leetify.com with Steam and added the match authentication code.' }
+    }
+    const recent = all.slice(0, Math.max(1, Math.min(10, limit)))
     result.pages = 1
 
     const imported: ImportedMatch[] = []
@@ -343,7 +344,12 @@ export class ScoutService {
         result.error = 'Leetify match details are not reachable right now.'
         continue
       }
-      const match = toImportedMatch(raw, rm.id, mySteamId, rm)
+      const match = toImportedMatch(raw, rm.id, mySteamId, {
+        finished_at: rm.finished_at,
+        map_name: rm.map_name,
+        data_source: rm.data_source,
+        team_scores: rm.team_scores
+      })
       if (!match) continue
       if (this.repos.insertMatch(match, settings.saveEncounterHistory)) {
         result.imported++
@@ -352,17 +358,33 @@ export class ScoutService {
     }
     logger.info('leetify.import', { imported: result.imported, skipped: result.skipped })
 
-    // Back-fill the live lobby from the newest match (imported now or already stored).
-    const newest = imported[0] ?? (recent[0] ? this.repos.getMatch(recent[0].id) : undefined)
-    if (newest) result.backfilled = await this.backfillFromMatch(newest)
+    // Back-fill the live lobby from the newest match that actually looks like it (map + names).
+    const candidates = recent.map((rm) => imported.find((m) => m.matchId === rm.id) ?? this.repos.getMatch(rm.id)).filter((m): m is ImportedMatch => !!m)
+    for (const m of candidates) {
+      const filled = await this.backfillFromMatch(m)
+      if (filled > 0) {
+        result.backfilled = filled
+        break
+      }
+    }
+    if (this.session && this.session.source !== 'steam_history' && result.backfilled === 0 && !result.error) {
+      result.error = 'None of the imported matches corresponds to the current lobby yet. Leetify usually needs a few minutes after a match ends.'
+    }
     return result
   }
 
-  /** Match live name-only players against an imported match and enrich them. */
+  /**
+   * Match live name-only players against an imported match and enrich them.
+   * Requires the same map (when known) and at least three overlapping names so
+   * a stale match never gets glued onto an unrelated lobby.
+   */
   private async backfillFromMatch(match: ImportedMatch): Promise<number> {
     const session = this.session
     if (!session || session.source === 'steam_history') return 0
+    if (session.map && match.map && session.map.toLowerCase() !== match.map.toLowerCase()) return 0
     const byName = new Map(match.players.map((p) => [p.name.trim().toLowerCase(), p]))
+    const overlap = [...session.players.values()].filter((p) => byName.has(p.name.trim().toLowerCase())).length
+    if (overlap < Math.min(3, match.players.length)) return 0
     const filled: ScoutPlayer[] = []
     for (const player of session.players.values()) {
       const mp = byName.get(player.name.trim().toLowerCase())

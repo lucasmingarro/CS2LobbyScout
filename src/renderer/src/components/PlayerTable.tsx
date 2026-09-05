@@ -66,10 +66,10 @@ export function PlayerTable({ players, selectedId, showScore, map, onSelect, onC
           <th className="num">Lvl / Rank</th>
           <th className="num">Matches</th>
           <th className="num">Win</th>
-          <th className="num">KD</th>
-          <th className="num">ADR</th>
+          <th className="num">Rate/KD</th>
+          <th className="num">Aim/ADR</th>
           <th className="num">HS</th>
-          <th className="num">Form</th>
+          <th className="num">Form/KAD</th>
           <th>Bans</th>
           {showScore && header('score', 'Score', true)}
           <th>Src</th>
@@ -98,16 +98,17 @@ export function PlayerTable({ players, selectedId, showScore, map, onSelect, onC
                         {p.steam?.profilePrivate && <span className="tag private">private</span>}
                         {p.identity === 'faceit_name' && <span className="tag unverified" title={identityLabel.faceit_name}>via faceit</span>}
                         {p.identity === 'leetify_match' && <span className="tag verified" title={identityLabel.leetify_match}>match</span>}
+                        {p.matchStats?.party !== undefined && <span className="tag party" title="Players sharing this number queued together">party {p.matchStats.party}</span>}
                       </div>
                       <div className="player-sub">
                         {p.steamId ?? (faceitStatus === 'pending' ? 'resolving…' : 'Steam ID hidden by server')}
                         {p.steam?.cs2Hours !== undefined && <span className="faint"> · {fmtInt(p.steam.cs2Hours)} h</span>}
                       </div>
                       {p.matchStats && (
-                        <div className="player-sub mono" title="This match: kills / assists / deaths · ADR · HS%">
-                          {p.matchStats.kills}/{p.matchStats.assists}/{p.matchStats.deaths}
-                          {p.matchStats.adr !== undefined ? ` · ${fmtInt(p.matchStats.adr)} ADR` : ''}
+                        <div className="player-sub mono" title="This match: ADR · HS% · score">
+                          {p.matchStats.adr !== undefined ? `${fmtInt(p.matchStats.adr)} ADR` : ''}
                           {p.matchStats.headshotPercentage !== undefined ? ` · ${fmtInt(p.matchStats.headshotPercentage)}% HS` : ''}
+                          {` · ${p.matchStats.score} pts`}
                         </div>
                       )}
                     </div>
@@ -127,7 +128,31 @@ export function PlayerTable({ players, selectedId, showScore, map, onSelect, onC
                 </td>
                 {/* ---- Valve line ---- */}
                 <td className="platform valve">Valve</td>
-                {valveStatus === 'ok' && v && v.premierRating !== undefined ? (
+                {p.matchStats?.premierRating ? (
+                  <>
+                    <td className="num premier" title="Premier rating in this match">
+                      {fmtInt(p.matchStats.premierRating)}
+                      {p.matchStats.premierRatingBefore !== undefined && p.matchStats.premierRatingBefore > 0 && (
+                        <span className={`faint delta ${p.matchStats.premierRating >= p.matchStats.premierRatingBefore ? 'up' : 'down'}`}>
+                          {p.matchStats.premierRating >= p.matchStats.premierRatingBefore ? '+' : ''}
+                          {p.matchStats.premierRating - p.matchStats.premierRatingBefore}
+                        </span>
+                      )}
+                    </td>
+                    <td className="num" title="Competitive rank on this map">{compRank !== undefined && compRank > 0 ? compRank : '–'}</td>
+                    <td className="num" title="Premier wins">{fmtInt(p.matchStats.premierWins)}</td>
+                    <td className="num">{fmtPct(v?.winRate)}</td>
+                    <td className="num" title="Leetify rating in this match">{fmtRating(p.matchStats.leetifyRating)}</td>
+                    <td className="num" title="Pre-aim (°) / reaction (ms) in this match">
+                      {p.matchStats.preaim !== undefined ? `${p.matchStats.preaim.toFixed(1)}°` : '–'}
+                      <span className="faint"> {p.matchStats.reactionTimeMs !== undefined ? `${fmtInt(p.matchStats.reactionTimeMs)}ms` : ''}</span>
+                    </td>
+                    <td className="num" title="Headshot accuracy in this match">{fmtPct(p.matchStats.headshotAccuracy)}</td>
+                    <td className="num" title="Kills / assists / deaths in this match">
+                      {p.matchStats.kills}/{p.matchStats.assists}/{p.matchStats.deaths}
+                    </td>
+                  </>
+                ) : valveStatus === 'ok' && v && v.premierRating !== undefined ? (
                   <>
                     <td className="num premier" title="Premier rating">{fmtInt(v.premierRating)}</td>
                     <td className="num" title="Competitive rank on this map (0-18)">{compRank !== undefined && compRank > 0 ? compRank : '–'}</td>

@@ -1,6 +1,6 @@
 {
   "name": "cs2-lobby-scout",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "External CS2 lobby scouting tool: aggregates public Steam and FACEIT data for the players in your current match.",
   "main": "./out/main/index.js",
   "author": "Lucas Mingarro",

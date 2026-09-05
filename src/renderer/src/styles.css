@@ -131,6 +131,10 @@ table.lobby td.num, table.lobby th.num { text-align: right; font-family: var(--m
 .tag.result-win { border-color: var(--ok); color: var(--ok); }
 .tag.result-loss { border-color: var(--danger); color: var(--danger); }
 .tag.result-tie { border-color: var(--warn); color: var(--warn); }
+.tag.party { border-color: var(--text-faint); }
+.delta { margin-left: 4px; font-size: 10px; }
+.delta.up { color: var(--ok); }
+.delta.down { color: var(--danger); }
 .tag.verified { border-color: var(--ok); color: var(--ok); }
 .tag.src-faceit { border-color: #ff5500; color: #ff7a33; }
 .tag.src-valve { border-color: var(--info); color: var(--info); }

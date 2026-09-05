@@ -1,7 +1,8 @@
 import { describe, expect, it, vi } from 'vitest'
 import { RequestManager } from '../src/main/services/request-manager'
 import { MemoryCache } from '../src/main/services/cache'
-import { LeetifyClient, toImportedMatch, toValveInfo, type LeetifyProfile } from '../src/main/services/leetify-client'
+import { isValveSource, LeetifyClient, modeFromDataSource, toImportedMatch, toValveInfo, type LeetifyProfile } from '../src/main/services/leetify-client'
+import { MATCH_DETAIL, ME, PROFILE_MATCHES } from './fixtures-leetify'
 
 /** Trimmed copy of a real /v3/profile response (2026-09-05). */
 const PROFILE: LeetifyProfile = {
@@ -82,7 +83,85 @@ describe('LeetifyClient', () => {
   })
 })
 
-describe('toImportedMatch', () => {
+describe('profile matches endpoint', () => {
+  it('returns Valve matches newest first and caches them', async () => {
+    const fetchImpl = vi.fn(async () => json([...PROFILE_MATCHES].reverse()))
+    const client = new LeetifyClient(new RequestManager({ fetchImpl: fetchImpl as unknown as typeof fetch }), new MemoryCache())
+    const rows = await client.profileMatches(ME)
+    expect(rows.map((r) => r.id)).toEqual(PROFILE_MATCHES.map((r) => r.id))
+    await client.profileMatches(ME)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+
+  it('keeps only Valve data sources', () => {
+    expect(isValveSource('matchmaking')).toBe(true)
+    expect(isValveSource('matchmaking_competitive')).toBe(true)
+    expect(isValveSource('faceit')).toBe(false)
+    expect(modeFromDataSource('matchmaking')).toBe('premier')
+    expect(modeFromDataSource('matchmaking_competitive')).toBe('competitive')
+  })
+
+  it('falls back to the legacy match endpoint and remembers it', async () => {
+    const fetchImpl = vi.fn(async (url: string) => (url.startsWith('https://api.leetify.com/api/games/') ? json(MATCH_DETAIL) : json({}, 404)))
+    const cache = new MemoryCache()
+    const client = new LeetifyClient(new RequestManager({ fetchImpl: fetchImpl as unknown as typeof fetch, retries: 0 }), cache)
+    const m = await client.match(MATCH_DETAIL.id)
+    expect(m?.id).toBe(MATCH_DETAIL.id)
+    expect(fetchImpl.mock.calls[0][0]).toContain('api.leetify.com/api/games/')
+    await client.match(MATCH_DETAIL.id)
+    expect(fetchImpl).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('toImportedMatch with the real legacy payload', () => {
+  const m = toImportedMatch(MATCH_DETAIL, MATCH_DETAIL.id, ME, {
+    finished_at: PROFILE_MATCHES[0].finished_at,
+    map_name: 'de_dust2',
+    data_source: 'matchmaking'
+  })!
+
+  it('reads mode, map, teams and score relative to me', () => {
+    expect(m.mode).toBe('premier')
+    expect(m.map).toBe('de_dust2')
+    expect(m.playedAt).toBe('2026-09-01T00:58:27.000Z')
+    expect(m.myScore).toBe(8)
+    expect(m.theirScore).toBe(13)
+    expect(m.result).toBe('loss')
+    expect(m.serverName).toContain('argentina')
+    expect(m.players.find((p) => p.name === 'blinky')?.team).toBe('mine')
+    expect(m.players.find((p) => p.name === 'FaritoXx')?.team).toBe('mine')
+    expect(m.players.find((p) => p.name === 'scz')?.team).toBe('enemy')
+  })
+
+  it('maps per-match stats, Premier rating and party', () => {
+    const scz = m.players.find((p) => p.name === 'scz')!
+    expect(scz.steamId).toBe('76561198286343610')
+    expect(scz.stats).toMatchObject({
+      kills: 21,
+      deaths: 12,
+      assists: 5,
+      mvps: 5,
+      score: 53,
+      adr: 88.81,
+      premierRating: 17193,
+      premierRatingBefore: 16969,
+      premierWins: 103,
+      party: 2
+    })
+    expect(scz.stats.headshotPercentage).toBeCloseTo(47.6, 1)
+    expect(scz.stats.headshotAccuracy).toBeCloseTo(26.9, 1)
+    expect(scz.stats.preaim).toBeCloseTo(9.0172)
+    expect(scz.stats.reactionTimeMs).toBe(672)
+    expect(scz.stats.leetifyRating).toBeCloseTo(10.71, 2)
+
+    const me = m.players.find((p) => p.steamId === ME)!
+    expect(me.stats.premierRating).toBe(8654)
+    expect(me.stats.premierRatingBefore).toBe(8866)
+    expect(me.stats.party).toBe(0)
+  })
+})
+
+describe('toImportedMatch (generic payloads)', () => {
   it('assigns teams relative to me and reads stats defensively', () => {
     const m = toImportedMatch(
       {
