@@ -61,13 +61,14 @@ function buildContext(): AppContext {
     const s = config.getSettings()
     if (d.rawHash === scout.currentRawHash()) return
     if (s.autoLoadDetectedLobby) {
-      try {
-        const session = scout.loadLobby(d.raw, 'clipboard')
-        emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: true, session, playerCount: d.playerCount })
-        return
-      } catch (err) {
-        logger.warn('clipboard.autoload_failed', errorFields(err))
-      }
+      scout
+        .loadLobby(d.raw, 'clipboard')
+        .then((session) => emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: true, session, playerCount: d.playerCount }))
+        .catch((err) => {
+          logger.warn('clipboard.autoload_failed', errorFields(err))
+          emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
+        })
+      return
     }
     emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
   })

@@ -42,10 +42,12 @@ const api = {
   parsePreview: (raw: string): Promise<ParsedLobby> => ipcRenderer.invoke(IPC.LOBBY_PARSE_PREVIEW, raw),
   loadLobby: (raw: string, source: 'paste' | 'clipboard' = 'paste'): Promise<LobbySession> =>
     ipcRenderer.invoke(IPC.LOBBY_LOAD, raw, source),
-  setTeam: (steamId: string, team: Team): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.LOBBY_SET_TEAM, steamId, team),
-  refreshPlayer: (steamId: string): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.PLAYER_REFRESH, steamId),
+  /** `key` is ScoutPlayer.key (Steam64 when known, otherwise a name key). */
+  setTeam: (key: string, team: Team): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.LOBBY_SET_TEAM, key, team),
+  refreshPlayer: (key: string): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.PLAYER_REFRESH, key),
   playerHistory: (steamId: string): Promise<PlayerHistory | undefined> => ipcRenderer.invoke(IPC.PLAYER_HISTORY, steamId),
-  watchPlayer: (steamId: string, watched: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.PLAYER_WATCH, steamId, watched),
+  /** Returns the resulting watched state; false when the player has no Steam64. */
+  watchPlayer: (key: string, watched: boolean): Promise<boolean> => ipcRenderer.invoke(IPC.PLAYER_WATCH, key, watched),
   listWatched: (): Promise<WatchedPlayerRow[]> => ipcRenderer.invoke(IPC.WATCHED_LIST),
   recheckBans: (): Promise<RecheckResult> => ipcRenderer.invoke(IPC.WATCHED_RECHECK),
   listBanEvents: (onlyUnacknowledged?: boolean): Promise<BanEvent[]> => ipcRenderer.invoke(IPC.BANS_LIST, onlyUnacknowledged),

@@ -1,8 +1,9 @@
 import { useState, type JSX } from 'react'
-import type { ScoutPlayer, Team } from '@shared/types'
+import type { LobbySession, ScoutPlayer, Team } from '@shared/types'
 import { PlayerTable } from '../components/PlayerTable'
 
 interface Props {
+  session?: LobbySession
   players: ScoutPlayer[]
   selectedId?: string
   showScore: boolean
@@ -30,7 +31,7 @@ function groupPlayers(players: ScoutPlayer[]): Group[] {
   return groups.filter((g) => g.players.length > 0)
 }
 
-export function LobbyScreen({ players, selectedId, showScore, loading, error, onLoad, onSelect, onSetTeam }: Props): JSX.Element {
+export function LobbyScreen({ session, players, selectedId, showScore, loading, error, onLoad, onSelect, onSetTeam }: Props): JSX.Element {
   const [raw, setRaw] = useState('')
   const [open, setOpen] = useState(players.length === 0)
 
@@ -88,6 +89,14 @@ export function LobbyScreen({ players, selectedId, showScore, loading, error, on
         )}
         {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
       </div>
+
+      {session?.officialServer && players.length > 0 && (
+        <div className="notice">
+          <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
+          exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with
+          the same name. Community and FACEIT servers still print the IDs.
+        </div>
+      )}
 
       {players.length === 0 ? (
         <div className="empty">

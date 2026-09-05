@@ -15,22 +15,19 @@ export function registerIpc(ctx: AppContext): void {
     return parseStatus(String(raw ?? ''), { mySteamId: settings.mySteamId || undefined })
   })
 
-  ipcMain.handle(IPC.LOBBY_LOAD, (_e, raw: string, source: 'paste' | 'clipboard' = 'paste') => {
-    const session = scout.loadLobby(String(raw ?? ''), source)
+  ipcMain.handle(IPC.LOBBY_LOAD, async (_e, raw: string, source: 'paste' | 'clipboard' = 'paste') => {
+    const session = await scout.loadLobby(String(raw ?? ''), source)
     clipboardWatcher.markHandled(parseStatus(String(raw ?? '')).rawHash)
     return session
   })
 
-  ipcMain.handle(IPC.LOBBY_SET_TEAM, (_e, steamId: string, team: Team) => scout.setTeam(steamId, team))
+  ipcMain.handle(IPC.LOBBY_SET_TEAM, (_e, key: string, team: Team) => scout.setTeam(key, team))
 
-  ipcMain.handle(IPC.PLAYER_REFRESH, (_e, steamId: string) => scout.refreshPlayer(steamId))
+  ipcMain.handle(IPC.PLAYER_REFRESH, (_e, key: string) => scout.refreshPlayer(key))
 
   ipcMain.handle(IPC.PLAYER_HISTORY, (_e, steamId: string) => repos.fullHistory(steamId))
 
-  ipcMain.handle(IPC.PLAYER_WATCH, (_e, steamId: string, watched: boolean) => {
-    scout.setWatched(steamId, watched)
-    return repos.isWatched(steamId)
-  })
+  ipcMain.handle(IPC.PLAYER_WATCH, (_e, key: string, watched: boolean) => scout.setWatched(key, watched))
 
   ipcMain.handle(IPC.WATCHED_LIST, () => repos.listWatched())
 

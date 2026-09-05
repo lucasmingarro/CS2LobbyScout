@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState, type JSX } from 'react'
 import type { PlayerHistory, ScoutPlayer } from '@shared/types'
 import { levelLabel } from '@shared/types'
 import { steamProfileUrl } from '@shared/steam-id'
-import { accountAge, fmtDate, fmtInt, fmtNum, fmtPct, scoreAvailable, sourceLabel } from '../format'
+import { accountAge, fmtDate, fmtInt, fmtNum, fmtPct, identityLabel, scoreAvailable, sourceLabel } from '../format'
 import { ScoreBadge } from './ScoreBadge'
 
 interface Props {
@@ -10,8 +10,8 @@ interface Props {
   showScore: boolean
   showSignals: boolean
   onClose: () => void
-  onWatch: (steamId: string, watched: boolean) => void
-  onRefresh: (steamId: string) => void
+  onWatch: (key: string, watched: boolean) => void
+  onRefresh: (key: string) => void
 }
 
 function Section({ title, children }: { title: string; children: React.ReactNode }): JSX.Element {
@@ -31,7 +31,8 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
 
   useEffect(() => {
     let alive = true
-    void window.scout.playerHistory(p.steamId).then((h) => alive && setHistory(h))
+    if (p.steamId) void window.scout.playerHistory(p.steamId).then((h) => alive && setHistory(h))
+    else setHistory(undefined)
     return () => {
       alive = false
     }
@@ -40,7 +41,7 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
   const refresh = async (): Promise<void> => {
     setRefreshing(true)
     try {
-      await onRefresh(p.steamId)
+      await onRefresh(p.key)
     } finally {
       setRefreshing(false)
     }
@@ -56,9 +57,11 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
         {p.avatarUrl ? <img className="avatar lg" src={p.avatarUrl} alt="" /> : <div className="avatar lg" />}
         <div>
           <h2>{p.name}</h2>
-          <div className="faint mono">{p.steamId}</div>
-          <div className="dim">
-            {p.isLocal && <span className="tag you">you</span>} {p.watched && <span className="tag watch">watching</span>}
+          <div className="faint mono">{p.steamId ?? 'Steam ID unknown'}</div>
+          <div className="dim" title={identityLabel[p.identity]}>
+            {p.isLocal && <span className="tag you">you</span>} {p.watched && <span className="tag watch">watching</span>}{' '}
+            {p.identity === 'faceit_name' && <span className="tag unverified">matched by FACEIT nickname</span>}
+            {p.identity === 'none' && <span className="tag private">not resolved</span>}
           </div>
         </div>
         <button className="btn sm ghost close" onClick={onClose} title="Close">
@@ -161,7 +164,13 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
             )}
           </dl>
         ) : (
-          <div className="dim">{p.sources.faceit === 'not_found' ? 'FACEIT: Not found' : sourceLabel[p.sources.faceit]}</div>
+          <div className="dim">
+            {p.sources.faceit === 'not_found'
+              ? p.identity === 'none'
+                ? 'FACEIT: no account with this exact nickname'
+                : 'FACEIT: Not found'
+              : sourceLabel[p.sources.faceit]}
+          </div>
         )}
       </Section>
 
@@ -192,15 +201,22 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
       </Section>
 
       <div className="panel-actions">
-        <button className={`btn ${p.watched ? '' : 'primary'}`} onClick={() => onWatch(p.steamId, !p.watched)}>
+        <button
+          className={`btn ${p.watched ? '' : 'primary'}`}
+          onClick={() => onWatch(p.key, !p.watched)}
+          disabled={!p.steamId}
+          title={p.steamId ? '' : 'Cannot watch a player without a Steam ID'}
+        >
           {p.watched ? 'Unwatch' : 'Watch player'}
         </button>
         <button className="btn" onClick={refresh} disabled={refreshing}>
           {refreshing ? 'Refreshing…' : 'Refresh'}
         </button>
-        <button className="btn" onClick={() => void window.scout.openExternal(s?.profileUrl ?? steamProfileUrl(p.steamId))}>
-          Steam profile
-        </button>
+        {p.steamId && (
+          <button className="btn" onClick={() => void window.scout.openExternal(s?.profileUrl ?? steamProfileUrl(p.steamId!))}>
+            Steam profile
+          </button>
+        )}
         {f?.profileUrl && (
           <button className="btn" onClick={() => void window.scout.openExternal(f.profileUrl!)}>
             FACEIT profile

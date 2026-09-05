@@ -34,7 +34,7 @@ export default function App(): JSX.Element {
 
   const applySession = useCallback((s: LobbySession): void => {
     setSession(s)
-    setPlayers(new Map(s.players.map((p) => [p.steamId, p])))
+    setPlayers(new Map(s.players.map((p) => [p.key, p])))
     setSelectedId(undefined)
     setTab('lobby')
   }, [])
@@ -52,9 +52,9 @@ export default function App(): JSX.Element {
     const offs = [
       window.scout.onPlayerUpdated((p) => {
         setPlayers((prev) => {
-          if (!prev.has(p.steamId)) return prev
+          if (!prev.has(p.key)) return prev
           const next = new Map(prev)
-          next.set(p.steamId, p)
+          next.set(p.key, p)
           return next
         })
       }),
@@ -104,24 +104,24 @@ export default function App(): JSX.Element {
     }
   }
 
-  const setTeam = async (steamId: string, team: Team): Promise<void> => {
-    const updated = await window.scout.setTeam(steamId, team)
-    if (updated) setPlayers((prev) => new Map(prev).set(steamId, updated))
+  const setTeam = async (key: string, team: Team): Promise<void> => {
+    const updated = await window.scout.setTeam(key, team)
+    if (updated) setPlayers((prev) => new Map(prev).set(key, updated))
   }
 
-  const watch = async (steamId: string, watched: boolean): Promise<void> => {
-    const now = await window.scout.watchPlayer(steamId, watched)
+  const watch = async (key: string, watched: boolean): Promise<void> => {
+    const now = await window.scout.watchPlayer(key, watched)
     setPlayers((prev) => {
-      const p = prev.get(steamId)
+      const p = prev.get(key)
       if (!p) return prev
-      return new Map(prev).set(steamId, { ...p, watched: now })
+      return new Map(prev).set(key, { ...p, watched: now })
     })
     setWatchedRefresh((n) => n + 1)
   }
 
-  const refreshPlayer = async (steamId: string): Promise<void> => {
-    const p = await window.scout.refreshPlayer(steamId)
-    if (p) setPlayers((prev) => new Map(prev).set(steamId, p))
+  const refreshPlayer = async (key: string): Promise<void> => {
+    const p = await window.scout.refreshPlayer(key)
+    if (p) setPlayers((prev) => new Map(prev).set(key, p))
   }
 
   const changeSettings = async (patch: Partial<AppSettings>): Promise<void> => {
@@ -138,7 +138,11 @@ export default function App(): JSX.Element {
       <header className="header">
         <div className="brand">
           CS2 LOBBY SCOUT
-          {session && <small>{session.players.length} players · {new Date(session.createdAt).toLocaleTimeString()}</small>}
+          {session && (
+            <small>
+              {session.players.length} players{session.map ? ` · ${session.map}` : ''} · {new Date(session.createdAt).toLocaleTimeString()}
+            </small>
+          )}
         </div>
         <nav className="tabs">
           <button className={`tab ${tab === 'lobby' ? 'active' : ''}`} onClick={() => setTab('lobby')}>
@@ -164,6 +168,7 @@ export default function App(): JSX.Element {
         <div className="content">
           {tab === 'lobby' && (
             <LobbyScreen
+              session={session}
               players={playerList}
               selectedId={selectedId}
               showScore={settings.showSuspicionScore}
