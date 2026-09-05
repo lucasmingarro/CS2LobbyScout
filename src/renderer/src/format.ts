@@ -41,7 +41,7 @@ export const sourceLabel: Record<SourceStatus, string> = {
 export const identityLabel: Record<IdentitySource, string> = {
   status: 'Steam ID from status',
   faceit_name: 'matched by FACEIT nickname (unverified)',
-  steam_history: 'from your Steam match history',
+  leetify_match: 'identified from your Leetify match (exact)',
   self: 'you (configured Steam ID)',
   none: 'Steam ID unknown'
 }
@@ -58,5 +58,5 @@ export function banSummary(p: ScoutPlayer): { text: string; danger: boolean } {
 }
 
 export function scoreAvailable(p: ScoutPlayer): boolean {
-  return p.sources.faceit === 'ok'
+  return p.scout.faceitScore !== undefined || p.scout.valveScore !== undefined
 }

@@ -128,6 +128,17 @@ table.lobby td.num, table.lobby th.num { text-align: right; font-family: var(--m
 .tag.you { border-color: var(--ok); color: var(--ok); }
 .tag.watch { border-color: var(--accent); color: var(--accent); }
 .tag.private { border-color: var(--text-faint); }
+.tag.verified { border-color: var(--ok); color: var(--ok); }
+.tag.src-faceit { border-color: #ff5500; color: #ff7a33; }
+.tag.src-valve { border-color: var(--info); color: var(--info); }
+.tag.src-account { border-color: var(--text-faint); }
+table.lobby.dual tr.first td { border-bottom: none; padding-bottom: 2px; }
+table.lobby.dual tr.second td { padding-top: 2px; border-bottom: 1px solid var(--border); }
+table.lobby.dual td.platform { font-size: 10px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-faint); }
+table.lobby.dual td.platform.valve { color: var(--info); }
+table.lobby.dual td.platform.faceit { color: #ff7a33; }
+td.premier, dd.premier { color: var(--info); font-weight: 700; }
+.sub-scores { display: flex; gap: 6px; justify-content: flex-end; font-size: 10px; color: var(--text-faint); font-family: var(--mono); margin-top: 2px; }
 .tag.unverified { border-color: var(--info); color: var(--info); }
 .notice {
   border: 1px solid var(--info); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; color: var(--text-dim); background: rgba(90, 169, 255, 0.06);

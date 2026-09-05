@@ -94,7 +94,7 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
         <div className="notice">
           <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
           exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with
-          the same name. Community and FACEIT servers still print the IDs.
+          the same name. After the match, <b>Import last match</b> identifies all ten players exactly through your Leetify profile.
         </div>
       )}
 
@@ -118,7 +118,7 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
             <h2 className="group-title">
               {g.title} <span className="faint">({g.players.length})</span> <span className="line" />
             </h2>
-            <PlayerTable players={g.players} selectedId={selectedId} showScore={showScore} onSelect={onSelect} onCycleTeam={onSetTeam} />
+            <PlayerTable players={g.players} selectedId={selectedId} showScore={showScore} map={session?.map} onSelect={onSelect} onCycleTeam={onSetTeam} />
           </div>
         ))
       )}

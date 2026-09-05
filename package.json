@@ -1,6 +1,6 @@
 {
   "name": "cs2-lobby-scout",
-  "version": "0.1.2",
+  "version": "0.2.0",
   "description": "External CS2 lobby scouting tool: aggregates public Steam and FACEIT data for the players in your current match.",
   "main": "./out/main/index.js",
   "author": "Lucas Mingarro",
@@ -19,7 +19,6 @@
   },
   "dependencies": {
     "better-sqlite3": "^12.2.0",
-    "cheerio": "^1.2.0",
     "dotenv": "^17.2.0"
   },
   "devDependencies": {

@@ -10,6 +10,7 @@ import type {
   ScoutResult,
   SteamInfo,
   Team,
+  ValveInfo,
   WatchedPlayerRow
 } from '@shared/types'
 import type { Db } from './database'
@@ -217,8 +218,8 @@ export class Repositories {
     this.db
       .prepare(
         `INSERT INTO scout_scores (steam_id, engine_version, score, kd_score, adr_score, hs_score, account_age_score,
-           match_count_score, win_rate_score, performance_jump_score, signals_json, captured_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+           match_count_score, win_rate_score, performance_jump_score, signals_json, faceit_score, valve_score, captured_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         steamId,
@@ -231,7 +232,28 @@ export class Repositories {
         c.matchCount,
         c.winRate,
         c.performanceJump,
-        JSON.stringify(r.signals),
+        JSON.stringify({ signals: r.signals, components: c }),
+        r.faceitScore ?? null,
+        r.valveScore ?? null,
+        nowIso()
+      )
+  }
+
+  insertValveSnapshot(steamId: string, v: ValveInfo): void {
+    this.db
+      .prepare(
+        `INSERT INTO valve_snapshots (steam_id, premier_rating, leetify_rating, total_matches, win_rate, preaim, reaction_time_ms, headshot_accuracy, captured_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      .run(
+        steamId,
+        v.premierRating ?? null,
+        v.leetifyRating ?? null,
+        v.totalMatches ?? null,
+        v.winRate ?? null,
+        v.preaim ?? null,
+        v.reactionTimeMs ?? null,
+        v.headshotAccuracy ?? null,
         nowIso()
       )
   }
@@ -533,6 +555,7 @@ export class Repositories {
       this.db.prepare(`DELETE FROM match_sessions`).run()
       this.db.prepare(`DELETE FROM ban_events`).run()
       this.db.prepare(`DELETE FROM scout_scores`).run()
+      this.db.prepare(`DELETE FROM valve_snapshots`).run()
       this.db.prepare(`DELETE FROM faceit_snapshots`).run()
       this.db.prepare(`DELETE FROM steam_snapshots`).run()
       this.db.prepare(`DELETE FROM players`).run()

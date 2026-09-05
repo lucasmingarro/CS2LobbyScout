@@ -9,6 +9,7 @@ import { Repositories } from './db/repositories'
 import { RequestManager } from './services/request-manager'
 import { SteamClient } from './services/steam-client'
 import { FaceitClient } from './services/faceit-client'
+import { LeetifyClient } from './services/leetify-client'
 import { ScoutService } from './services/scout-service'
 import { BanRecheckService } from './services/ban-recheck'
 import { ClipboardWatcher } from './clipboard-watcher'
@@ -55,7 +56,8 @@ function buildContext(): AppContext {
   const rm = new RequestManager({ concurrencyPerHost: 4 })
   const steam = new SteamClient(rm, cache, () => config.getKey('steam').value)
   const faceit = new FaceitClient(rm, cache, () => config.getKey('faceit').value)
-  const scout = new ScoutService(repos, steam, faceit, config, emitToRenderer)
+  const leetify = new LeetifyClient(rm, cache)
+  const scout = new ScoutService(repos, steam, faceit, leetify, config, emitToRenderer)
   const banRecheck = new BanRecheckService(repos, steam, emitToRenderer)
   const clipboardWatcher = new ClipboardWatcher((d) => {
     const s = config.getSettings()

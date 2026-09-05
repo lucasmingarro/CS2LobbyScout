@@ -12,7 +12,7 @@ export type Team = 'unknown' | 'mine' | 'enemy'
  *  - self:        matched the configured local Steam ID by persona name.
  *  - none:        name only, nothing could be resolved.
  */
-export type IdentitySource = 'status' | 'faceit_name' | 'steam_history' | 'self' | 'none'
+export type IdentitySource = 'status' | 'faceit_name' | 'leetify_match' | 'self' | 'none'
 
 /** A player as extracted from raw CS2 `status` output. */
 export interface LobbyPlayer {
@@ -53,12 +53,20 @@ export interface ScoutSignal {
   label: string
   points: number
   explanation: string
+  source: SignalSource
 }
 
+export type SignalSource = 'faceit' | 'valve' | 'account'
+
 export interface ScoutResult {
+  /** Overall score: the higher of the two platform sub-scores. */
   score: number
   level: ScoutLevel
   signals: ScoutSignal[]
+  /** FACEIT-based sub-score (0-100), undefined when there is no FACEIT data. */
+  faceitScore?: number
+  /** Valve-based sub-score (0-100), undefined when there is no Valve/Leetify data. */
+  valveScore?: number
   /** Per-component breakdown, mirrors the scout_scores table. */
   components: {
     kd: number
@@ -68,6 +76,12 @@ export interface ScoutResult {
     matchCount: number
     winRate: number
     performanceJump: number
+    /** Valve-side components. */
+    valveRating: number
+    valvePreaim: number
+    valveReaction: number
+    valveHsAccuracy: number
+    valveRatingMismatch: number
   }
   /** Human readable notes about data that was missing / ignored. */
   notes: string[]
@@ -120,7 +134,47 @@ export type SourceStatus = 'pending' | 'ok' | 'not_found' | 'unavailable' | 'no_
 export interface SourceStatuses {
   steam: SourceStatus
   faceit: SourceStatus
+  /** Valve-side statistics (Premier rating, aim metrics) via Leetify. */
+  valve: SourceStatus
   history: SourceStatus
+}
+
+/**
+ * Valve matchmaking statistics for a player, sourced from Leetify's public API.
+ * Leetify parses the demos of every Valve match one of its users plays, so most
+ * active Premier players have data even without a Leetify account.
+ */
+export interface ValveInfo {
+  /** Premier rating (CS Rating). */
+  premierRating?: number
+  /** Competitive skill group (0-18) per map, keyed by map name (de_mirage, ...). */
+  competitiveRanks?: Record<string, number>
+  /** Leetify rating: average round-win-probability contribution in %, roughly -10..+10. */
+  leetifyRating?: number
+  totalMatches?: number
+  winRate?: number
+  firstMatchAt?: string
+  /** Aim metrics (Leetify definitions). */
+  preaim?: number
+  reactionTimeMs?: number
+  headshotAccuracy?: number
+  sprayAccuracy?: number
+  accuracyEnemySpotted?: number
+  /** Skill ratings 0-100 from Leetify. */
+  ratings?: { aim?: number; positioning?: number; utility?: number; clutch?: number; opening?: number }
+  /** Aggregates over the most recent Valve matches Leetify has. */
+  recent?: {
+    matches: number
+    wins: number
+    losses: number
+    ties: number
+    avgLeetifyRating?: number
+    /** Premier rating at the newest and oldest recent match. */
+    premierNow?: number
+    premierThen?: number
+  }
+  bans?: string[]
+  profileUrl?: string
 }
 
 export interface HistoryInfo {
@@ -143,6 +197,7 @@ export interface ScoutPlayer {
   ping?: number
   steam?: SteamInfo
   faceit?: FaceitInfo
+  valve?: ValveInfo
   scout: ScoutResult
   history: HistoryInfo
   sources: SourceStatuses
@@ -159,6 +214,10 @@ export interface MatchPlayerStats {
   headshotPercentage?: number
   score: number
   ping?: number
+  adr?: number
+  /** Premier rating at the time of the match, when known. */
+  premierRating?: number
+  leetifyRating?: number
 }
 
 export type MatchMode = 'competitive' | 'premier' | 'wingman' | 'other'

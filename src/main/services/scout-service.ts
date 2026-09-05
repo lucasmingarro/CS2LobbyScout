@@ -6,6 +6,7 @@ import type { Repositories } from '../db/repositories'
 import type { ConfigStore } from '../config'
 import type { SteamClient } from './steam-client'
 import type { FaceitClient } from './faceit-client'
+import type { LeetifyClient } from './leetify-client'
 import { errorFields, logger } from '../logger'
 
 export type Emitter = (channel: string, payload: unknown) => void
@@ -39,6 +40,7 @@ export class ScoutService {
     private repos: Repositories,
     private steam: SteamClient,
     private faceit: FaceitClient,
+    private leetify: LeetifyClient,
     private config: ConfigStore,
     private emit: Emitter
   ) {}
@@ -122,6 +124,7 @@ export class ScoutService {
         sources: {
           steam: !this.steam.hasKey() ? 'no_key' : steamId ? 'pending' : 'no_id',
           faceit: this.faceit.hasKey() ? 'pending' : 'no_key',
+          valve: steamId ? 'pending' : 'no_id',
           history: 'ok'
         },
         watched: false
@@ -165,14 +168,37 @@ export class ScoutService {
   }
 
   private rescore(player: ScoutPlayer): void {
-    player.scout = computeScore({ steam: player.steam, faceit: player.faceit })
+    player.scout = computeScore({ steam: player.steam, faceit: player.faceit, valve: player.valve })
   }
 
   private async enrichAll(session: ActiveSession, keys: string[], bypassCache: boolean): Promise<void> {
     const targets = keys.map((k) => session.players.get(k)).filter((p): p is ScoutPlayer => !!p)
     // FACEIT first: for name-only players it is also what gives us a Steam64.
     await Promise.all(targets.map((p) => this.enrichFaceit(session, p, bypassCache)))
-    await this.enrichSteam(session, targets.filter((p) => p.steamId), bypassCache)
+    const identified = targets.filter((p) => p.steamId)
+    await Promise.all([this.enrichSteam(session, identified, bypassCache), ...identified.map((p) => this.enrichValve(session, p, bypassCache))])
+  }
+
+  /** Valve matchmaking statistics via Leetify (Premier rating, aim metrics, recent form). */
+  private async enrichValve(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
+    if (!player.steamId) {
+      player.sources.valve = 'no_id'
+      return
+    }
+    player.sources.valve = 'pending'
+    try {
+      const r = await this.leetify.profile(player.steamId, { bypassCache })
+      player.sources.valve = r.status
+      if (r.status === 'ok' && r.info) player.valve = r.info
+    } catch (err) {
+      player.sources.valve = 'unavailable'
+      logger.warn('valve.lookup_failed', { steamId: player.steamId, ...errorFields(err) })
+    }
+    this.rescore(player)
+    if (player.sources.valve === 'ok' && player.steamId && player.valve && (player.valve.premierRating !== undefined || player.valve.leetifyRating !== undefined)) {
+      this.repos.insertValveSnapshot(player.steamId, player.valve)
+    }
+    this.pushUpdate(session, player)
   }
 
   private async enrichFaceit(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
@@ -190,6 +216,7 @@ export class ScoutService {
           player.steamId = r.steamId
           player.identity = 'faceit_name'
           player.sources.steam = this.steam.hasKey() ? 'pending' : 'no_key'
+          player.sources.valve = 'pending'
           this.registerIdentified(session, player)
           logger.info('identity.faceit_name', { name: player.name, steamId: r.steamId })
         }
@@ -248,6 +275,7 @@ export class ScoutService {
     if (!session || !player) return undefined
     player.sources.steam = !this.steam.hasKey() ? 'no_key' : player.steamId ? 'pending' : 'no_id'
     player.sources.faceit = this.faceit.hasKey() ? 'pending' : 'no_key'
+    player.sources.valve = player.steamId ? 'pending' : 'no_id'
     this.pushUpdate(session, player)
     await this.enrichAll(session, [key], true)
     if (player.steamId) player.history = this.repos.history(player.steamId)

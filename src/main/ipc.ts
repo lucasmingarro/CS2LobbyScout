@@ -5,7 +5,7 @@ import type { AppSettings, Team } from '@shared/types'
 import type { AppContext } from './context'
 import { errorFields, logger, setDebug } from './logger'
 
-const ALLOWED_HOSTS = ['steamcommunity.com', 'www.faceit.com', 'faceit.com', 'steamcommunity.com', 'developers.faceit.com']
+const ALLOWED_HOSTS = ['steamcommunity.com', 'www.faceit.com', 'faceit.com', 'developers.faceit.com', 'leetify.com', 'www.leetify.com']
 
 export function registerIpc(ctx: AppContext): void {
   const { repos, scout, banRecheck, config, clipboardWatcher } = ctx
