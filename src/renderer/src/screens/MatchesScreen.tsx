@@ -44,9 +44,10 @@ export function MatchesScreen({ refreshToken, onOpen, onImport }: Props): JSX.El
         </button>
       </div>
       <div className="notice">
-        Matches come from your <b>Leetify</b> profile (leetify.com, sign in with Steam and add the Steam match authentication code). Each
-        match lists the exact Steam IDs and teams of all ten players. Import right after a match finishes to identify the lobby you just
-        played.
+        Only <b>your own</b> Leetify account is needed (leetify.com, sign in with Steam and add the Steam match authentication code); the
+        players you meet need nothing. Each imported match carries the exact Steam IDs, teams, Premier ratings and per-round stats of all ten
+        players, and the app builds every player's Valve profile from the matches it has stored. The more you import, the more it knows about
+        the people you keep running into.
       </div>
       {rows.length === 0 ? (
         <div className="empty">

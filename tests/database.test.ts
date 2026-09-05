@@ -97,3 +97,68 @@ describe('Repositories', () => {
     expect(repos.counts()).toMatchObject({ players: 0, sessions: 0, cache: 1 })
   })
 })
+
+describe('Valve aggregates from imported matches', () => {
+  const match = (id: string, playedAt: string, result: 'win' | 'loss', rating: number): Parameters<Repositories['insertMatch']>[0] => ({
+    matchId: id,
+    mode: 'premier',
+    map: 'de_dust2',
+    playedAt,
+    result,
+    myScore: result === 'win' ? 13 : 8,
+    theirScore: result === 'win' ? 8 : 13,
+    players: [
+      {
+        steamId: '76561198000000001',
+        name: 'enemy',
+        team: 'enemy',
+        stats: { kills: 20, assists: 4, deaths: 10, mvps: 3, score: 50, adr: 90, headshotPercentage: 60, headshotAccuracy: 25, preaim: 5, reactionTimeMs: 400, leetifyRating: 6.5, premierRating: rating, premierRatingBefore: rating - 100, premierWins: 40, party: 1 }
+      },
+      {
+        steamId: '76561198000000002',
+        name: 'mate',
+        team: 'mine',
+        stats: { kills: 10, assists: 2, deaths: 15, mvps: 0, score: 20, adr: 50, headshotPercentage: 30 }
+      }
+    ]
+  })
+
+  it('aggregates stats and Premier trend for every player of every match', () => {
+    repos.insertMatch(match('m1', '2026-09-01T00:00:00Z', 'loss', 15000), true)
+    repos.insertMatch(match('m2', '2026-09-02T00:00:00Z', 'win', 15400), true)
+
+    const agg = repos.valveAggregates(['76561198000000001', '76561198000000002'])
+    const enemy = agg.get('76561198000000001')!
+    expect(enemy).toMatchObject({
+      source: 'matches',
+      sampleMatches: 2,
+      premierRating: 15400,
+      premierRatingThen: 15000,
+      premierWins: 40,
+      kd: 2,
+      adr: 90,
+      headshotPercentage: 60,
+      headshotAccuracy: 25,
+      preaim: 5,
+      reactionTimeMs: 400,
+      leetifyRating: 6.5
+    })
+    // the enemy won the match I lost and lost the one I won
+    expect(enemy.winRate).toBe(50)
+    expect(agg.get('76561198000000002')?.kd).toBeCloseTo(0.67, 2)
+    expect(agg.get('nobody')).toBeUndefined()
+  })
+
+  it('round-trips the full per-match stats', () => {
+    repos.insertMatch(match('m3', '2026-09-03T00:00:00Z', 'win', 16000), true)
+    const stored = repos.getMatch('m3')!
+    const enemy = stored.players.find((p) => p.name === 'enemy')!
+    expect(enemy.stats).toMatchObject({ adr: 90, premierRating: 16000, premierRatingBefore: 15900, premierWins: 40, preaim: 5, reactionTimeMs: 400, party: 1 })
+    const mate = stored.players.find((p) => p.name === 'mate')!
+    expect(mate.stats).toMatchObject({ kills: 10, deaths: 15, adr: 50, headshotPercentage: 30 })
+    // fields absent from the payload stay absent
+    expect(mate.stats.premierRating).toBeUndefined()
+    expect(mate.stats.preaim).toBeUndefined()
+    expect(mate.stats.party).toBeUndefined()
+  })
+})

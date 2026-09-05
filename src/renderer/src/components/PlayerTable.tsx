@@ -152,23 +152,33 @@ export function PlayerTable({ players, selectedId, showScore, map, onSelect, onC
                       {p.matchStats.kills}/{p.matchStats.assists}/{p.matchStats.deaths}
                     </td>
                   </>
-                ) : valveStatus === 'ok' && v && v.premierRating !== undefined ? (
+                ) : valveStatus === 'ok' && v ? (
                   <>
-                    <td className="num premier" title="Premier rating">{fmtInt(v.premierRating)}</td>
+                    <td className="num premier" title={v.source === 'matches' ? 'Premier rating from imported matches' : 'Premier rating'}>
+                      {v.premierRating !== undefined ? fmtInt(v.premierRating) : '–'}
+                    </td>
                     <td className="num" title="Competitive rank on this map (0-18)">{compRank !== undefined && compRank > 0 ? compRank : '–'}</td>
-                    <td className="num">{fmtInt(v.totalMatches)}</td>
+                    <td className="num" title={v.source === 'matches' ? `${v.sampleMatches} imported matches` : 'Valve matches on record'}>
+                      {fmtInt(v.totalMatches ?? v.sampleMatches)}
+                    </td>
                     <td className="num">{fmtPct(v.winRate)}</td>
-                    <td className="num" title="Leetify rating">{fmtRating(v.leetifyRating)}</td>
-                    <td className="num" title="Pre-aim (°) / reaction (ms)">
-                      {v.preaim !== undefined ? `${v.preaim.toFixed(1)}°` : '–'}
+                    <td className="num" title={v.leetifyRating !== undefined ? 'Leetify rating' : 'KD in Valve matches'}>
+                      {v.leetifyRating !== undefined ? fmtRating(v.leetifyRating) : fmtNum(v.kd)}
+                    </td>
+                    <td className="num" title="Pre-aim (°) / reaction (ms) / ADR">
+                      {v.preaim !== undefined ? `${v.preaim.toFixed(1)}°` : fmtInt(v.adr)}
                       <span className="faint"> {v.reactionTimeMs !== undefined ? `${fmtInt(v.reactionTimeMs)}ms` : ''}</span>
                     </td>
-                    <td className="num" title="Headshot accuracy">{fmtPct(v.headshotAccuracy)}</td>
+                    <td className="num" title="Headshot accuracy / percentage">{fmtPct(v.headshotAccuracy ?? v.headshotPercentage)}</td>
                     <td className="num" title={`Last ${v.recent?.matches ?? 0} Valve matches`}>{form}</td>
                   </>
                 ) : (
                   <td colSpan={8} className="dim">
-                    {valveStatus === 'pending' ? 'loading…' : valveStatus === 'ok' ? 'no Valve statistics (private on Leetify)' : `Valve: ${sourceLabel[valveStatus]}`}
+                    {valveStatus === 'pending'
+                      ? 'loading…'
+                      : valveStatus === 'not_found' || valveStatus === 'ok'
+                        ? 'no Valve data yet — import the match to get it'
+                        : `Valve: ${sourceLabel[valveStatus]}`}
                   </td>
                 )}
                 <td rowSpan={2}>{bans.danger ? <span className="tag ban">{bans.text}</span> : <span className="dim">{bans.text}</span>}</td>

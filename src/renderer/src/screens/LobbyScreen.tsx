@@ -117,7 +117,8 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
         <div className="notice">
           <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
           exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with
-          the same name. After the match, <b>Import last match</b> identifies all ten players exactly through your Leetify profile.
+          the same name. After the match, <b>Import last match</b> identifies all ten players exactly and pulls their Premier rating and stats
+          out of the match itself — they do not need an account anywhere.
         </div>
       )}
 

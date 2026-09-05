@@ -128,7 +128,7 @@ export default function App(): JSX.Element {
   const [matchesRefresh, setMatchesRefresh] = useState(0)
 
   const importMatches = async (): Promise<string | undefined> => {
-    const r = await window.scout.importLastMatches(3)
+    const r = await window.scout.importLastMatches(10)
     setMatchesRefresh((n) => n + 1)
     if (r.error && r.imported === 0) return r.error
     const parts = [`${r.imported} imported`, `${r.skipped} already known`]

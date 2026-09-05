@@ -82,6 +82,7 @@ export interface ScoutResult {
     valveReaction: number
     valveHsAccuracy: number
     valveRatingMismatch: number
+    valveKd: number
   }
   /** Human readable notes about data that was missing / ignored. */
   notes: string[]
@@ -145,8 +146,26 @@ export interface SourceStatuses {
  * active Premier players have data even without a Leetify account.
  */
 export interface ValveInfo {
+  /**
+   * Where these numbers come from:
+   *  - leetify_profile: the player has a public Leetify profile (lifetime stats).
+   *  - matches: aggregated from the Valve matches this app has imported, which
+   *    include every player of each match regardless of whether they use Leetify.
+   *  - mixed: profile data completed with match aggregates.
+   */
+  source?: 'leetify_profile' | 'matches' | 'mixed'
+  /** How many imported matches the aggregate is based on. */
+  sampleMatches?: number
   /** Premier rating (CS Rating). */
   premierRating?: number
+  /** Premier rating in the oldest imported match, to show a trend. */
+  premierRatingThen?: number
+  /** Wins counted by Valve for the Premier season. */
+  premierWins?: number
+  /** Averages over imported matches. */
+  kd?: number
+  adr?: number
+  headshotPercentage?: number
   /** Competitive skill group (0-18) per map, keyed by map name (de_mirage, ...). */
   competitiveRanks?: Record<string, number>
   /** Leetify rating: average round-win-probability contribution in %, roughly -10..+10. */

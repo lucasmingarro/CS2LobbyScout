@@ -1,4 +1,4 @@
-import type { IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team } from '@shared/types'
+import type { IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team, ValveInfo } from '@shared/types'
 import { parseStatus } from '@shared/lobby-parser'
 import { computeScore, ENGINE_VERSION } from '@shared/scout-engine'
 import { IPC } from '@shared/ipc'
@@ -10,6 +10,34 @@ import { toImportedMatch, type LeetifyClient } from './leetify-client'
 import { errorFields, logger } from '../logger'
 
 export type Emitter = (channel: string, payload: unknown) => void
+
+/**
+ * Combines the public Leetify profile with the aggregate built from imported
+ * matches. Profile values win where they exist (they cover the player's whole
+ * history); match aggregates fill the rest and always provide the Premier
+ * rating, which the profile hides for non-Leetify users.
+ */
+export function mergeValve(profile: ValveInfo | undefined, local: ValveInfo | undefined): ValveInfo | undefined {
+  const hasProfile = !!profile && (profile.premierRating !== undefined || profile.leetifyRating !== undefined || profile.preaim !== undefined)
+  if (!hasProfile) return local
+  if (!local) return { ...profile!, source: 'leetify_profile' }
+  const pick = <K extends keyof ValveInfo>(key: K): ValveInfo[K] => (profile![key] !== undefined ? profile![key] : local[key])
+  return {
+    ...local,
+    ...profile,
+    source: 'mixed',
+    sampleMatches: local.sampleMatches,
+    premierRating: pick('premierRating'),
+    premierRatingThen: local.premierRatingThen,
+    premierWins: local.premierWins ?? profile!.premierWins,
+    kd: pick('kd'),
+    adr: pick('adr'),
+    headshotPercentage: pick('headshotPercentage'),
+    preaim: pick('preaim'),
+    reactionTimeMs: pick('reactionTimeMs'),
+    headshotAccuracy: pick('headshotAccuracy')
+  }
+}
 
 interface ActiveSession {
   id?: number
@@ -181,19 +209,34 @@ export class ScoutService {
     await Promise.all([this.enrichSteam(session, identified, bypassCache), ...identified.map((p) => this.enrichValve(session, p, bypassCache))])
   }
 
-  /** Valve matchmaking statistics via Leetify (Premier rating, aim metrics, recent form). */
+  /**
+   * Valve matchmaking statistics. Two sources, merged:
+   *  - the player's public Leetify profile, which only exists for Leetify users;
+   *  - the matches this app imported, which carry the full scoreboard and the
+   *    Premier rating of all ten players whether or not they use Leetify.
+   */
   private async enrichValve(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
     if (!player.steamId) {
       player.sources.valve = 'no_id'
       return
     }
     player.sources.valve = 'pending'
+    const local = this.repos.valveAggregates([player.steamId]).get(player.steamId)
     try {
       const r = await this.leetify.profile(player.steamId, { bypassCache })
-      player.sources.valve = r.status
-      if (r.status === 'ok' && r.info) player.valve = r.info
+      const profile = r.status === 'ok' ? r.info : undefined
+      const merged = mergeValve(profile, local)
+      if (merged) {
+        player.valve = merged
+        player.sources.valve = 'ok'
+      } else {
+        player.sources.valve = r.status === 'ok' ? 'not_found' : r.status
+      }
     } catch (err) {
-      player.sources.valve = 'unavailable'
+      if (local) {
+        player.valve = local
+        player.sources.valve = 'ok'
+      } else player.sources.valve = 'unavailable'
       logger.warn('valve.lookup_failed', { steamId: player.steamId, ...errorFields(err) })
     }
     this.rescore(player)
@@ -320,7 +363,7 @@ export class ScoutService {
    * Pulls the newest Valve matches of the configured Steam account from Leetify,
    * stores them, and back-fills the live lobby (names -> exact Steam64 + team).
    */
-  async importLastMatches(limit = 3): Promise<ImportResult> {
+  async importLastMatches(limit = 10): Promise<ImportResult> {
     const settings = this.config.getSettings()
     const mySteamId = settings.mySteamId
     const result: ImportResult = { imported: 0, skipped: 0, pages: 0, backfilled: 0 }
@@ -367,10 +410,30 @@ export class ScoutService {
         break
       }
     }
+    await this.refreshValveFromMatches()
     if (this.session && this.session.source !== 'steam_history' && result.backfilled === 0 && !result.error) {
       result.error = 'None of the imported matches corresponds to the current lobby yet. Leetify usually needs a few minutes after a match ends.'
     }
     return result
+  }
+
+  /** Recomputes the Valve line of the current lobby from the imported matches. */
+  private async refreshValveFromMatches(): Promise<void> {
+    const session = this.session
+    if (!session) return
+    const players = [...session.players.values()].filter((p) => p.steamId)
+    if (players.length === 0) return
+    const aggregates = this.repos.valveAggregates(players.map((p) => p.steamId!))
+    for (const player of players) {
+      const local = aggregates.get(player.steamId!)
+      if (!local) continue
+      const profile = player.valve?.source === 'matches' ? undefined : player.valve
+      player.valve = mergeValve(profile, local)
+      player.sources.valve = 'ok'
+      this.rescore(player)
+      if (player.valve) this.repos.insertValveSnapshot(player.steamId!, player.valve)
+      this.pushUpdate(session, player)
+    }
   }
 
   /**

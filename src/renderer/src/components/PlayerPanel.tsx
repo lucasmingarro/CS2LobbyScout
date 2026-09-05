@@ -187,10 +187,35 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
       )}
 
       <Section title={`Valve · ${sourceLabel[p.sources.valve]}`}>
-        {v && (v.premierRating !== undefined || v.leetifyRating !== undefined) ? (
+        {v ? (
           <dl className="kv">
+            <dt>Data from</dt>
+            <dd className="faint">
+              {v.source === 'matches'
+                ? `${v.sampleMatches} imported match(es)`
+                : v.source === 'mixed'
+                  ? `Leetify profile + ${v.sampleMatches} match(es)`
+                  : 'Leetify profile'}
+            </dd>
             <dt>Premier rating</dt>
-            <dd className="premier">{fmtInt(v.premierRating)}</dd>
+            <dd className="premier">
+              {fmtInt(v.premierRating)}
+              {v.premierRatingThen !== undefined && <span className="faint"> (from {fmtInt(v.premierRatingThen)})</span>}
+            </dd>
+            {v.premierWins !== undefined && (
+              <>
+                <dt>Premier wins</dt>
+                <dd>{fmtInt(v.premierWins)}</dd>
+              </>
+            )}
+            {v.kd !== undefined && (
+              <>
+                <dt>KD · ADR</dt>
+                <dd>
+                  {fmtNum(v.kd)} · {fmtInt(v.adr)}
+                </dd>
+              </>
+            )}
             <dt>Leetify rating</dt>
             <dd>{fmtRating(v.leetifyRating)}</dd>
             <dt>Matches</dt>
@@ -240,6 +265,12 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
                 </dd>
               </>
             )}
+            {v.headshotPercentage !== undefined && (
+              <>
+                <dt>Headshot %</dt>
+                <dd>{fmtPct(v.headshotPercentage)}</dd>
+              </>
+            )}
             {v.firstMatchAt && (
               <>
                 <dt>First Valve match seen</dt>
@@ -249,11 +280,9 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
           </dl>
         ) : (
           <div className="dim">
-            {p.sources.valve === 'not_found'
-              ? 'No Valve match data on Leetify for this player.'
-              : p.sources.valve === 'ok'
-                ? 'Leetify profile is private.'
-                : sourceLabel[p.sources.valve]}
+            {p.sources.valve === 'not_found' || p.sources.valve === 'ok'
+              ? 'No Valve data yet. Import the match this player was in (Matches tab) — imported matches carry the Premier rating and stats of all ten players, whether or not they use Leetify.'
+              : sourceLabel[p.sources.valve]}
           </div>
         )}
       </Section>

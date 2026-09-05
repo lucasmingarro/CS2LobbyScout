@@ -159,7 +159,8 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
     valvePreaim: 0,
     valveReaction: 0,
     valveHsAccuracy: 0,
-    valveRatingMismatch: 0
+    valveRatingMismatch: 0,
+    valveKd: 0
   }
 
   // =========================== FACEIT sub-score ===============================
@@ -263,10 +264,11 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
   // =========================== VALVE sub-score ================================
   let valveScore: number | undefined
   let valveAllowed = false
-  const hasValveStats = !!v && (v.leetifyRating !== undefined || v.preaim !== undefined || v.reactionTimeMs !== undefined || v.headshotAccuracy !== undefined)
+  const hasValveStats =
+    !!v && (v.leetifyRating !== undefined || v.preaim !== undefined || v.reactionTimeMs !== undefined || v.headshotAccuracy !== undefined || v.kd !== undefined)
   if (hasValveStats) {
     const T = THRESHOLDS.valve
-    const matches = v!.totalMatches
+    const matches = v!.totalMatches ?? v!.sampleMatches
     const smallSample = matches !== undefined && matches < THRESHOLDS.minReliableMatches
     const factor = smallSample ? 0.5 : 1
 
@@ -303,6 +305,20 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
           explanation: `Reaction time ${fmt(v!.reactionTimeMs, 0)} ms (points start below ${T.reaction.from} ms, max at ${T.reaction.to} ms).`
         })
     }
+    if (v!.kd !== undefined) {
+      const T2 = THRESHOLDS.faceit.kd
+      const pts = Math.round(ramp(v!.kd, T2.from, T2.to, T2.max) * factor * 0.6)
+      if (pts > 0) {
+        components.valveKd = pts
+        signals.push({
+          type: 'valve_kd_high',
+          source: 'valve',
+          label: v!.kd >= 1.7 ? 'Very high KD in Valve matches' : 'High KD in Valve matches',
+          points: pts,
+          explanation: `KD ${fmt(v!.kd)} across ${matches ?? '?'} Valve matches on record (points start at ${T2.from}).`
+        })
+      }
+    }
     if (v!.headshotAccuracy !== undefined) {
       components.valveHsAccuracy = Math.round(ramp(v!.headshotAccuracy, T.hsAccuracy.from, T.hsAccuracy.to, T.hsAccuracy.max) * factor)
       if (components.valveHsAccuracy > 0)
@@ -316,7 +332,7 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
     }
     if (smallSample) notes.push(`Only ${matches} Valve matches on record: performance points halved (noisy sample).`)
 
-    const perf = components.valveRating + components.valvePreaim + components.valveReaction + components.valveHsAccuracy
+    const perf = components.valveRating + components.valvePreaim + components.valveReaction + components.valveHsAccuracy + components.valveKd
     const allowed = perf >= THRESHOLDS.contextGate
     valveAllowed = allowed
 
@@ -356,6 +372,7 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
         components.valvePreaim +
         components.valveReaction +
         components.valveHsAccuracy +
+        components.valveKd +
         valveWin +
         components.valveRatingMismatch +
         valveMatchCount +
