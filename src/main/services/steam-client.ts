@@ -118,6 +118,25 @@ export class SteamClient {
     return out
   }
 
+  /** Resolves a custom profile url (steamcommunity.com/id/<vanity>) to a Steam64. */
+  async resolveVanity(vanity: string): Promise<string | undefined> {
+    const key = this.getKey()
+    if (!key) return undefined
+    const cacheKey = `steam:vanity:${vanity.toLowerCase()}`
+    const cached = this.cache.get<{ steamId: string | null }>(cacheKey)
+    if (cached) return cached.steamId ?? undefined
+    try {
+      const url = `${API}/ISteamUser/ResolveVanityURL/v1/?key=${encodeURIComponent(key)}&vanityurl=${encodeURIComponent(vanity)}`
+      const data = await this.rm.getJson<{ response: { success: number; steamid?: string } }>(cacheKey, url)
+      const steamId = data.response?.success === 1 && data.response.steamid ? data.response.steamid : null
+      this.cache.set(cacheKey, { steamId }, TTL.steamProfile * 7)
+      return steamId ?? undefined
+    } catch (err) {
+      logger.debug('steam.vanity_failed', { vanity, error: (err as Error).message })
+      return undefined
+    }
+  }
+
   private async summaries(ids: string[], key: string, bypass?: boolean): Promise<Map<string, PlayerSummary>> {
     return this.batched<PlayerSummary>(ids, 'steam:summary:', TTL.steamProfile, bypass, async (batch) => {
       const url = `${API}/ISteamUser/GetPlayerSummaries/v2/?key=${encodeURIComponent(key)}&steamids=${batch.join(',')}`

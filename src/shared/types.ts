@@ -12,7 +12,7 @@ export type Team = 'unknown' | 'mine' | 'enemy'
  *  - self:        matched the configured local Steam ID by persona name.
  *  - none:        name only, nothing could be resolved.
  */
-export type IdentitySource = 'status' | 'faceit_name' | 'self' | 'none'
+export type IdentitySource = 'status' | 'faceit_name' | 'steam_history' | 'self' | 'none'
 
 /** A player as extracted from raw CS2 `status` output. */
 export interface LobbyPlayer {
@@ -147,12 +147,80 @@ export interface ScoutPlayer {
   history: HistoryInfo
   sources: SourceStatuses
   watched: boolean
+  /** Per-match scoreboard numbers when the lobby comes from an imported Valve match. */
+  matchStats?: MatchPlayerStats
+}
+
+export interface MatchPlayerStats {
+  kills: number
+  assists: number
+  deaths: number
+  mvps: number
+  headshotPercentage?: number
+  score: number
+  ping?: number
+}
+
+export type MatchMode = 'competitive' | 'premier' | 'wingman' | 'other'
+
+/** A match imported from the user's own Steam match history. */
+export interface ImportedMatch {
+  matchId: string
+  mode: MatchMode
+  map?: string
+  playedAt: string
+  durationSeconds?: number
+  waitSeconds?: number
+  /** Score of the team the local user was on, then the opponents. */
+  myScore?: number
+  theirScore?: number
+  result?: 'win' | 'loss' | 'tie' | 'unknown'
+  players: ImportedMatchPlayer[]
+}
+
+export interface ImportedMatchPlayer {
+  steamId: string
+  name: string
+  avatarUrl?: string
+  team: Team
+  stats: MatchPlayerStats
+}
+
+export interface MatchSummary {
+  matchId: string
+  mode: MatchMode
+  map?: string
+  playedAt: string
+  durationSeconds?: number
+  myScore?: number
+  theirScore?: number
+  result?: 'win' | 'loss' | 'tie' | 'unknown'
+  playerCount: number
+}
+
+export interface SteamLoginStatus {
+  loggedIn: boolean
+  /** Steam64 of the logged-in account when it can be determined from the profile redirect. */
+  steamId?: string
+  /** Set when the logged-in account differs from settings.mySteamId. */
+  mismatch?: boolean
+}
+
+export interface ImportResult {
+  imported: number
+  skipped: number
+  pages: number
+  error?: string
+  /** Names from the current live lobby that got a Steam64 from the import. */
+  backfilled: number
 }
 
 export interface LobbySession {
   id: number
   createdAt: string
-  source: 'paste' | 'clipboard'
+  source: 'paste' | 'clipboard' | 'steam_history'
+  /** Present when the session shows an imported match. */
+  match?: MatchSummary
   officialServer: boolean
   map?: string
   players: ScoutPlayer[]

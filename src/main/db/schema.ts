@@ -1,5 +1,5 @@
 /** SQLite schema. Bump SCHEMA_VERSION and add a migration step when changing tables. */
-export const SCHEMA_VERSION = 1
+export const SCHEMA_VERSION = 2
 
 export const MIGRATIONS: Record<number, string> = {
   1: `
@@ -99,5 +99,37 @@ export const MIGRATIONS: Record<number, string> = {
       detected_at        TEXT NOT NULL,
       acknowledged       INTEGER NOT NULL DEFAULT 0
     );
+  `
+,
+  2: `
+    CREATE TABLE IF NOT EXISTS matches (
+      match_id         TEXT PRIMARY KEY,
+      mode             TEXT NOT NULL,
+      map              TEXT,
+      played_at        TEXT NOT NULL,
+      duration_seconds INTEGER,
+      wait_seconds     INTEGER,
+      my_score         INTEGER,
+      their_score      INTEGER,
+      result           TEXT,
+      imported_at      TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_matches_played ON matches(played_at DESC);
+
+    CREATE TABLE IF NOT EXISTS match_players (
+      match_id            TEXT NOT NULL REFERENCES matches(match_id) ON DELETE CASCADE,
+      steam_id            TEXT NOT NULL,
+      name                TEXT NOT NULL,
+      team                TEXT NOT NULL,
+      kills               INTEGER NOT NULL DEFAULT 0,
+      assists             INTEGER NOT NULL DEFAULT 0,
+      deaths              INTEGER NOT NULL DEFAULT 0,
+      mvps                INTEGER NOT NULL DEFAULT 0,
+      headshot_percentage REAL,
+      score               INTEGER NOT NULL DEFAULT 0,
+      ping                INTEGER,
+      PRIMARY KEY (match_id, steam_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_match_players_steam ON match_players(steam_id);
   `
 }

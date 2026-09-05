@@ -2,6 +2,10 @@ import type {
   BanEvent,
   FaceitInfo,
   HistoryInfo,
+  ImportedMatch,
+  ImportedMatchPlayer,
+  MatchMode,
+  MatchSummary,
   PlayerHistory,
   ScoutResult,
   SteamInfo,
@@ -406,11 +410,125 @@ export class Repositories {
     this.db.prepare(`UPDATE ban_events SET acknowledged = 1 WHERE id = ?`).run(id)
   }
 
+  // ---- imported matches --------------------------------------------------------
+
+  hasMatch(matchId: string): boolean {
+    return !!this.db.prepare(`SELECT 1 FROM matches WHERE match_id = ?`).get(matchId)
+  }
+
+  /** Stores a match and its players; also registers each player as seen. Returns false if it already existed. */
+  insertMatch(m: ImportedMatch, countEncounters: boolean): boolean {
+    if (this.hasMatch(m.matchId)) return false
+    const run = this.db.transaction(() => {
+      this.db
+        .prepare(
+          `INSERT INTO matches (match_id, mode, map, played_at, duration_seconds, wait_seconds, my_score, their_score, result, imported_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        )
+        .run(m.matchId, m.mode, m.map ?? null, m.playedAt, m.durationSeconds ?? null, m.waitSeconds ?? null, m.myScore ?? null, m.theirScore ?? null, m.result ?? null, nowIso())
+      const ins = this.db.prepare(
+        `INSERT OR REPLACE INTO match_players (match_id, steam_id, name, team, kills, assists, deaths, mvps, headshot_percentage, score, ping)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      )
+      for (const p of m.players) {
+        ins.run(m.matchId, p.steamId, p.name, p.team, p.stats.kills, p.stats.assists, p.stats.deaths, p.stats.mvps, p.stats.headshotPercentage ?? null, p.stats.score, p.stats.ping ?? null)
+        this.upsertPlayerSeen(p.steamId, p.name, p.avatarUrl, countEncounters)
+      }
+      if (countEncounters) {
+        const sessionId = this.createSession('steam_history', m.matchId)
+        for (const p of m.players) {
+          this.db
+            .prepare(`INSERT INTO encounters (match_session_id, steam_id, team, encountered_at) VALUES (?, ?, ?, ?) ON CONFLICT(match_session_id, steam_id) DO UPDATE SET team = excluded.team`)
+            .run(sessionId, p.steamId, p.team, m.playedAt)
+        }
+      }
+    })
+    run()
+    return true
+  }
+
+  listMatches(limit = 100): MatchSummary[] {
+    const rows = this.db
+      .prepare(
+        `SELECT m.*, (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.match_id) AS player_count
+         FROM matches m ORDER BY played_at DESC LIMIT ?`
+      )
+      .all(limit) as Array<{
+      match_id: string
+      mode: MatchMode
+      map: string | null
+      played_at: string
+      duration_seconds: number | null
+      my_score: number | null
+      their_score: number | null
+      result: string | null
+      player_count: number
+    }>
+    return rows.map((r) => ({
+      matchId: r.match_id,
+      mode: r.mode,
+      map: r.map ?? undefined,
+      playedAt: r.played_at,
+      durationSeconds: r.duration_seconds ?? undefined,
+      myScore: r.my_score ?? undefined,
+      theirScore: r.their_score ?? undefined,
+      result: (r.result as MatchSummary['result']) ?? undefined,
+      playerCount: r.player_count
+    }))
+  }
+
+  getMatch(matchId: string): ImportedMatch | undefined {
+    const summary = this.listMatches(1000).find((m) => m.matchId === matchId)
+    if (!summary) return undefined
+    const rows = this.db
+      .prepare(`SELECT mp.*, p.avatar_url FROM match_players mp LEFT JOIN players p ON p.steam_id = mp.steam_id WHERE mp.match_id = ? ORDER BY mp.team, mp.score DESC`)
+      .all(matchId) as Array<{
+      steam_id: string
+      name: string
+      team: Team
+      kills: number
+      assists: number
+      deaths: number
+      mvps: number
+      headshot_percentage: number | null
+      score: number
+      ping: number | null
+      avatar_url: string | null
+    }>
+    const players: ImportedMatchPlayer[] = rows.map((r) => ({
+      steamId: r.steam_id,
+      name: r.name,
+      avatarUrl: r.avatar_url ?? undefined,
+      team: r.team,
+      stats: {
+        kills: r.kills,
+        assists: r.assists,
+        deaths: r.deaths,
+        mvps: r.mvps,
+        headshotPercentage: r.headshot_percentage ?? undefined,
+        score: r.score,
+        ping: r.ping ?? undefined
+      }
+    }))
+    const { playerCount: _pc, ...rest } = summary
+    void _pc
+    return { ...rest, players }
+  }
+
+  /** Most recent imported matches (newest first) — used to back-fill live lobbies. */
+  recentMatches(limit = 5): ImportedMatch[] {
+    return this.listMatches(limit)
+      .map((m) => this.getMatch(m.matchId))
+      .filter((m): m is ImportedMatch => !!m)
+  }
+
   // ---- maintenance -------------------------------------------------------------
 
   /** Deletes all history (players, snapshots, sessions, bans). Keeps the API cache. */
   clearHistory(): void {
     const run = this.db.transaction(() => {
+      this.db.prepare(`DELETE FROM match_players`).run()
+      this.db.prepare(`DELETE FROM matches`).run()
       this.db.prepare(`DELETE FROM encounters`).run()
       this.db.prepare(`DELETE FROM match_sessions`).run()
       this.db.prepare(`DELETE FROM ban_events`).run()
@@ -422,12 +540,13 @@ export class Repositories {
     run()
   }
 
-  counts(): { players: number; watched: number; sessions: number; cache: number } {
+  counts(): { players: number; watched: number; sessions: number; matches: number; cache: number } {
     const one = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n
     return {
       players: one(`SELECT COUNT(*) n FROM players`),
       watched: one(`SELECT COUNT(*) n FROM players WHERE watched = 1`),
       sessions: one(`SELECT COUNT(*) n FROM match_sessions`),
+      matches: one(`SELECT COUNT(*) n FROM matches`),
       cache: one(`SELECT COUNT(*) n FROM api_cache`)
     }
   }

@@ -19,9 +19,17 @@ export const IPC = {
   HISTORY_CLEAR: 'history:clear',
   OPEN_EXTERNAL: 'shell:open-external',
   APP_INFO: 'app:info',
+  STEAM_LOGIN: 'steam:login',
+  STEAM_STATUS: 'steam:status',
+  STEAM_LOGOUT: 'steam:logout',
+  MATCHES_IMPORT: 'matches:import',
+  MATCHES_LIST: 'matches:list',
+  MATCH_OPEN: 'matches:open',
   // main -> renderer (send)
   EVT_LOBBY_DETECTED: 'evt:lobby-detected',
   EVT_PLAYER_UPDATED: 'evt:player-updated',
   EVT_BAN_DETECTED: 'evt:ban-detected',
-  EVT_LOG: 'evt:log'
+  EVT_LOG: 'evt:log',
+  EVT_STEAM_LOGIN: 'evt:steam-login',
+  EVT_LOBBY_REPLACED: 'evt:lobby-replaced'
 } as const
