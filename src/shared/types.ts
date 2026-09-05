@@ -5,10 +5,24 @@
 
 export type Team = 'unknown' | 'mine' | 'enemy'
 
+/**
+ * How a player's Steam identity was established.
+ *  - status:      the Steam ID was printed by `status` (community / FACEIT servers).
+ *  - faceit_name: resolved by exact FACEIT nickname match (Valve servers hide ids). Unverified.
+ *  - self:        matched the configured local Steam ID by persona name.
+ *  - none:        name only, nothing could be resolved.
+ */
+export type IdentitySource = 'status' | 'faceit_name' | 'self' | 'none'
+
 /** A player as extracted from raw CS2 `status` output. */
 export interface LobbyPlayer {
-  steamId: string
+  /** Stable key within a lobby: the Steam64 when known, otherwise `name:<lower-cased name>`. */
+  key: string
+  /** Steam64. Missing on official Valve servers, which no longer print ids in `status`. */
+  steamId?: string
   name: string
+  /** Connection state as printed by status (active, spawning, ...). */
+  state?: string
   /** Steam account id (the X in [U:1:X]) when derivable. */
   accountId?: number
   ping?: number
@@ -20,6 +34,10 @@ export interface LobbyPlayer {
 
 export interface ParsedLobby {
   players: LobbyPlayer[]
+  /** True when the text came from an official Valve server (ids hidden). */
+  officialServer: boolean
+  /** Map name when present in the spawngroups section. */
+  map?: string
   /** Number of lines that looked like player rows but could not be parsed. */
   ignoredLines: number
   /** Lower-case sha-like fingerprint of the raw text (used to dedupe sessions). */
@@ -97,7 +115,7 @@ export interface FaceitInfo {
   activatedAt?: string
 }
 
-export type SourceStatus = 'pending' | 'ok' | 'not_found' | 'unavailable' | 'no_key' | 'skipped'
+export type SourceStatus = 'pending' | 'ok' | 'not_found' | 'unavailable' | 'no_key' | 'skipped' | 'no_id'
 
 export interface SourceStatuses {
   steam: SourceStatus
@@ -113,7 +131,11 @@ export interface HistoryInfo {
 }
 
 export interface ScoutPlayer {
-  steamId: string
+  /** Stable per-lobby key (see LobbyPlayer.key). Use this for UI identity. */
+  key: string
+  /** Steam64 once known. Enrichment, history and watching require it. */
+  steamId?: string
+  identity: IdentitySource
   name: string
   avatarUrl?: string
   team: Team
@@ -131,6 +153,8 @@ export interface LobbySession {
   id: number
   createdAt: string
   source: 'paste' | 'clipboard'
+  officialServer: boolean
+  map?: string
   players: ScoutPlayer[]
 }
 

@@ -64,20 +64,48 @@ export class FaceitClient {
     return { Authorization: `Bearer ${key}`, Accept: 'application/json' }
   }
 
+  /** Look up by Steam64 (the reliable path when `status` printed ids). */
   async lookup(steamId: string, options: { bypassCache?: boolean } = {}): Promise<FaceitLookupResult> {
     const key = this.getKey()
     if (!key) return { status: 'unavailable' }
-
     let profile: CachedProfile | undefined
     try {
-      profile = await this.profile(steamId, key, options.bypassCache)
+      profile = await this.profile(`faceit:profile:${steamId}`, `${API}/players?game=${GAME}&game_player_id=${encodeURIComponent(steamId)}`, key, options.bypassCache)
     } catch (err) {
       logger.warn('faceit.profile_failed', { steamId, error: (err as Error).message })
       return { status: 'unavailable' }
     }
     if (profile.notFound) return { status: 'not_found' }
+    return { status: 'ok', info: await this.enrich(profile.player, key, options.bypassCache) }
+  }
 
+  /**
+   * Look up by exact FACEIT nickname. Used on official Valve servers, where
+   * `status` hides Steam ids: when a player uses the same nickname on FACEIT
+   * we get their profile *and* their Steam64 (games.cs2.game_player_id).
+   * The match is unverified and the UI must say so.
+   */
+  async lookupByNickname(nickname: string, options: { bypassCache?: boolean } = {}): Promise<FaceitLookupResult & { steamId?: string }> {
+    const key = this.getKey()
+    if (!key) return { status: 'unavailable' }
+    const nick = nickname.trim()
+    if (!nick || nick.length > 64) return { status: 'not_found' }
+    let profile: CachedProfile | undefined
+    try {
+      profile = await this.profile(`faceit:nick:${nick.toLowerCase()}`, `${API}/players?nickname=${encodeURIComponent(nick)}`, key, options.bypassCache)
+    } catch (err) {
+      logger.warn('faceit.nick_failed', { nickname: nick, error: (err as Error).message })
+      return { status: 'unavailable' }
+    }
+    if (profile.notFound) return { status: 'not_found' }
     const p = profile.player
+    if (p.nickname.toLowerCase() !== nick.toLowerCase()) return { status: 'not_found' }
+    const steamId = p.games?.[GAME]?.game_player_id
+    if (!steamId || !/^7656119\d{10}$/.test(steamId)) return { status: 'not_found' }
+    return { status: 'ok', steamId, info: await this.enrich(p, key, options.bypassCache) }
+  }
+
+  private async enrich(p: FaceitPlayer, key: string, bypassCache?: boolean): Promise<FaceitInfo> {
     const game = p.games?.[GAME]
     const info: FaceitInfo = {
       playerId: p.player_id,
@@ -91,12 +119,12 @@ export class FaceitClient {
     }
 
     const [lifetime, recent] = await Promise.all([
-      this.lifetime(p.player_id, key, options.bypassCache).catch((err) => {
-        logger.warn('faceit.stats_failed', { steamId, error: (err as Error).message })
+      this.lifetime(p.player_id, key, bypassCache).catch((err) => {
+        logger.warn('faceit.stats_failed', { playerId: p.player_id, error: (err as Error).message })
         return undefined
       }),
-      this.recent(p.player_id, key, options.bypassCache).catch((err) => {
-        logger.debug('faceit.recent_failed', { steamId, error: (err as Error).message })
+      this.recent(p.player_id, key, bypassCache).catch((err) => {
+        logger.debug('faceit.recent_failed', { playerId: p.player_id, error: (err as Error).message })
         return undefined
       })
     ])
@@ -126,17 +154,14 @@ export class FaceitClient {
         winRate: wins.length ? (wins.reduce((a, b) => a + b, 0) / wins.length) * 100 : undefined
       }
     }
-
-    return { status: 'ok', info }
+    return info
   }
 
-  private async profile(steamId: string, key: string, bypass?: boolean): Promise<CachedProfile> {
-    const cacheKey = `faceit:profile:${steamId}`
+  private async profile(cacheKey: string, url: string, key: string, bypass?: boolean): Promise<CachedProfile> {
     if (!bypass) {
       const cached = this.cache.get<CachedProfile>(cacheKey)
       if (cached) return cached
     }
-    const url = `${API}/players?game=${GAME}&game_player_id=${encodeURIComponent(steamId)}`
     try {
       const player = await this.rm.getJson<FaceitPlayer>(cacheKey, url, { headers: this.headers(key) })
       const value: CachedProfile = { notFound: false, player }

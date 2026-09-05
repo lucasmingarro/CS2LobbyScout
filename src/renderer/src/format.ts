@@ -1,4 +1,4 @@
-import type { ScoutPlayer, SourceStatus } from '@shared/types'
+import type { IdentitySource, ScoutPlayer, SourceStatus } from '@shared/types'
 
 export const fmtNum = (v: number | undefined, digits = 2): string => (v === undefined ? '–' : v.toFixed(digits))
 export const fmtInt = (v: number | undefined): string => (v === undefined ? '–' : Math.round(v).toString())
@@ -34,7 +34,15 @@ export const sourceLabel: Record<SourceStatus, string> = {
   not_found: 'not found',
   unavailable: 'unavailable',
   no_key: 'no API key',
-  skipped: 'skipped'
+  skipped: 'skipped',
+  no_id: 'no Steam ID'
+}
+
+export const identityLabel: Record<IdentitySource, string> = {
+  status: 'Steam ID from status',
+  faceit_name: 'matched by FACEIT nickname (unverified)',
+  self: 'you (configured Steam ID)',
+  none: 'Steam ID unknown'
 }
 
 export function banSummary(p: ScoutPlayer): { text: string; danger: boolean } {

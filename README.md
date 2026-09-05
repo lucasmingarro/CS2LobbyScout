@@ -4,9 +4,29 @@ External scouting tool for Counter-Strike 2. Paste the output of the in-game `st
 
 The app never touches the game process. It reads no memory, injects nothing, hooks nothing and automates no input. It only aggregates public data from Steam and FACEIT and stores it locally. Scores measure *statistical anomaly*, never "cheating". See [`docs/MVP.md`](docs/MVP.md) for the full specification.
 
-## Features (MVP 0.1.0)
+## Important: Steam IDs on official Valve servers
 
-- Parse CS2 (and legacy CS:GO) `status` output: Steam IDs, names, ping. Duplicates and bots are dropped.
+Since 2023 CS2 **hides Steam IDs in `status` on Valve matchmaking servers** (Competitive, Premier, Wingman, Deathmatch). The output only contains names:
+
+```
+[Client]   id     time ping loss      state   rate name
+[Client] 65280    00:09   75    0   spawning 786432 'Ramiirez'
+[Client] Official Valve Server
+```
+
+Lobby Scout handles this as follows:
+
+- Every name is looked up on FACEIT by **exact nickname**. When a FACEIT account with that nickname exists, its profile, stats and Steam64 are used. These rows are tagged **via faceit** because the match is unverified: someone else may use the same name.
+- Your own row is recognised through the persona name of the Steam ID configured in Settings.
+- Players that cannot be resolved are shown with name and ping only. They cannot be watched or scored.
+- On community servers and FACEIT / ESEA servers `status` still prints `[U:1:...]` ids and everything resolves exactly.
+
+Reliable identities for Valve matches will need a different source (for example importing your own Steam match history after the game). That is planned, see the roadmap in `docs/MVP.md`.
+
+## Features (MVP 0.1.x)
+
+- Parse CS2 (and legacy CS:GO) `status` output: Steam IDs when present, names, ping, connection state, map and server type. Duplicates, bots and empty slots are dropped.
+- Resolve name-only players through exact FACEIT nickname lookup (see above).
 - Clipboard detection: copy `status` in-game and the app offers to load it (or loads it automatically).
 - Steam enrichment: name, avatar, profile visibility, account age, CS2 hours, VAC / game bans.
 - FACEIT enrichment: level, ELO, matches, KD, ADR, HS%, win rate, plus recent-form averages.

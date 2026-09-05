@@ -128,6 +128,12 @@ table.lobby td.num, table.lobby th.num { text-align: right; font-family: var(--m
 .tag.you { border-color: var(--ok); color: var(--ok); }
 .tag.watch { border-color: var(--accent); color: var(--accent); }
 .tag.private { border-color: var(--text-faint); }
+.tag.unverified { border-color: var(--info); color: var(--info); }
+.notice {
+  border: 1px solid var(--info); border-radius: 8px; padding: 10px 12px; margin-bottom: 16px; color: var(--text-dim); background: rgba(90, 169, 255, 0.06);
+}
+.notice code { background: var(--bg-elev-2); padding: 1px 5px; border-radius: 4px; }
+.src span.no_id { background: var(--text-faint); }
 .tag.ban { border-color: var(--danger); color: var(--danger); font-weight: 700; }
 
 .team-btn {

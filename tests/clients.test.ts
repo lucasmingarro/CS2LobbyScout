@@ -93,7 +93,7 @@ describe('FaceitClient', () => {
     country: 'ar',
     faceit_url: 'https://www.faceit.com/{lang}/players/aimexe',
     activated_at: '2026-04-01T00:00:00Z',
-    games: { cs2: { skill_level: 4, faceit_elo: 1180, game_player_id: '1' } }
+    games: { cs2: { skill_level: 4, faceit_elo: 1180, game_player_id: '76561197961500295' } }
   }
   const stats = {
     lifetime: { Matches: '91', 'Win Rate %': '68', 'Average K/D Ratio': '1.82', 'Average Headshots %': '74', ADR: '116.3', 'Recent Results': ['1', '1', '0', '1', '1'] }
@@ -106,6 +106,10 @@ describe('FaceitClient', () => {
     return vi.fn(async (url: string, init?: RequestInit) => {
       expect((init?.headers as Record<string, string>).Authorization).toBe('Bearer FKEY')
       if (url.includes('/players?game=cs2&game_player_id=')) return notFound ? json({ errors: [{ message: 'not found' }] }, 404) : json(player)
+      if (url.includes('/players?nickname=')) {
+        const nick = decodeURIComponent(url.split('nickname=')[1])
+        return nick.toLowerCase() === 'aimexe' && !notFound ? json(player) : json({ errors: [{ message: 'not found' }] }, 404)
+      }
       if (url.endsWith('/players/f-1/stats/cs2')) return json(stats)
       if (url.includes('/players/f-1/games/cs2/stats')) return json(recent)
       return json({}, 404)
@@ -136,6 +140,22 @@ describe('FaceitClient', () => {
 
     await client.lookup('1')
     expect(fetchImpl).toHaveBeenCalledTimes(3)
+  })
+
+  it('resolves a Steam64 from an exact FACEIT nickname', async () => {
+    const fetchImpl = makeFetch()
+    const client = new FaceitClient(new RequestManager({ fetchImpl: fetchImpl as unknown as typeof fetch }), new MemoryCache(), () => 'FKEY')
+    const r = await client.lookupByNickname('AimExe')
+    expect(r.status).toBe('ok')
+    expect(r.steamId).toBe('76561197961500295')
+    expect(r.info).toMatchObject({ nickname: 'aimexe', level: 4, kd: 1.82 })
+
+    const miss = await client.lookupByNickname('someone else')
+    expect(miss.status).toBe('not_found')
+    expect(miss.steamId).toBeUndefined()
+    // cached negative lookup
+    await client.lookupByNickname('someone else')
+    expect(fetchImpl.mock.calls.filter((c) => String(c[0]).includes('someone')).length).toBe(1)
   })
 
   it('returns not_found (and caches it) when no FACEIT account exists', async () => {

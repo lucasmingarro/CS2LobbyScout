@@ -1,6 +1,6 @@
 import { useState, type JSX } from 'react'
 import type { ScoutPlayer, Team } from '@shared/types'
-import { banSummary, fmtInt, fmtNum, fmtPct } from '../format'
+import { banSummary, fmtInt, fmtNum, fmtPct, identityLabel } from '../format'
 import { ScoreBadge } from './ScoreBadge'
 import { Sources } from './Sources'
 
@@ -10,8 +10,8 @@ interface Props {
   players: ScoutPlayer[]
   selectedId?: string
   showScore: boolean
-  onSelect: (steamId: string) => void
-  onCycleTeam: (steamId: string, next: Team) => void
+  onSelect: (key: string) => void
+  onCycleTeam: (key: string, next: Team) => void
 }
 
 const nextTeam: Record<Team, Team> = { unknown: 'enemy', enemy: 'mine', mine: 'unknown' }
@@ -78,7 +78,7 @@ export function PlayerTable({ players, selectedId, showScore, onSelect, onCycleT
         {sorted.map((p) => {
           const bans = banSummary(p)
           return (
-            <tr key={p.steamId} className={`row ${selectedId === p.steamId ? 'selected' : ''}`} onClick={() => onSelect(p.steamId)}>
+            <tr key={p.key} className={`row ${selectedId === p.key ? 'selected' : ''}`} onClick={() => onSelect(p.key)}>
               <td>
                 <div className="player-cell">
                   {p.avatarUrl ? <img className="avatar" src={p.avatarUrl} alt="" /> : <div className="avatar" />}
@@ -86,8 +86,11 @@ export function PlayerTable({ players, selectedId, showScore, onSelect, onCycleT
                     <div className="player-name" title={p.name}>
                       {p.name} {p.isLocal && <span className="tag you">you</span>} {p.watched && <span className="tag watch">watch</span>}
                       {p.steam?.profilePrivate && <span className="tag private">private</span>}
+                      {p.identity === 'faceit_name' && <span className="tag unverified" title={identityLabel.faceit_name}>via faceit</span>}
                     </div>
-                    <div className="player-sub">{p.faceit?.nickname && p.faceit.nickname !== p.name ? `FACEIT: ${p.faceit.nickname}` : p.steamId}</div>
+                    <div className="player-sub">
+                      {p.steamId ?? (p.sources.faceit === 'pending' ? 'resolving…' : 'Steam ID hidden by server')}
+                    </div>
                   </div>
                 </div>
               </td>
@@ -97,7 +100,7 @@ export function PlayerTable({ players, selectedId, showScore, onSelect, onCycleT
                   title="Click to cycle team assignment"
                   onClick={(e) => {
                     e.stopPropagation()
-                    onCycleTeam(p.steamId, nextTeam[p.team])
+                    onCycleTeam(p.key, nextTeam[p.team])
                   }}
                 >
                   {teamLabel[p.team]}

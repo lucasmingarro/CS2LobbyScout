@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import { fingerprint, isLikelyStatusOutput, parseStatus } from '@shared/lobby-parser'
 import { accountIdToSteam64, steam64ToAccountId } from '@shared/steam-id'
 import { CS2_STATUS, CSGO_STATUS } from './fixtures'
+import { VALVE_STATUS } from './fixtures-valve'
 
 describe('steam-id', () => {
   it('converts account id <-> steam64', () => {
@@ -96,5 +97,48 @@ describe('parseStatus edge cases', () => {
   it('fingerprint is stable and differs for different text', () => {
     expect(fingerprint('abc')).toBe(fingerprint('abc  '))
     expect(fingerprint('abc')).not.toBe(fingerprint('abd'))
+  })
+})
+
+describe('parseStatus (official Valve server, ids hidden)', () => {
+  const parsed = parseStatus(VALVE_STATUS, { myName: 'blinky', mySteamId: '76561198973228659' })
+
+  it('extracts all ten humans by name and drops empty / connecting slots', () => {
+    expect(parsed.players).toHaveLength(10)
+    expect(parsed.players.map((p) => p.name)).toEqual([
+      'Ramiirez',
+      'Ø',
+      'xXZedScoutXx',
+      'iTzDMR_17',
+      'éogu',
+      'Luhhh',
+      '3siete',
+      '[L J T]ティジペラルタ',
+      'tremendo',
+      'blinky'
+    ])
+    for (const p of parsed.players) expect(p.steamId).toBeUndefined()
+  })
+
+  it('uses a name key, keeps ping / time / state and detects the official server + map', () => {
+    const zed = parsed.players.find((p) => p.name === 'xXZedScoutXx')!
+    expect(zed.key).toBe('name:xxzedscoutxx')
+    expect(zed.ping).toBe(7)
+    expect(zed.connectedFor).toBe('00:10')
+    expect(zed.state).toBe('active')
+    expect(parsed.players.find((p) => p.name === 'Ramiirez')!.state).toBe('spawning')
+    expect(parsed.officialServer).toBe(true)
+    expect(parsed.map).toBe('cs_office')
+    expect(parsed.looksLikeStatus).toBe(true)
+    expect(isLikelyStatusOutput(VALVE_STATUS)).toBe(true)
+  })
+
+  it('marks the local player by persona name', () => {
+    expect(parsed.players.find((p) => p.name === 'blinky')!.isLocal).toBe(true)
+    expect(parsed.players.filter((p) => p.isLocal)).toHaveLength(1)
+  })
+
+  it('does not treat the server steamid line as a player', () => {
+    expect(parsed.players.some((p) => p.name.includes('A:1:'))).toBe(false)
   })
 })
