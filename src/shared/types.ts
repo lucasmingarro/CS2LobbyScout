@@ -7,12 +7,13 @@ export type Team = 'unknown' | 'mine' | 'enemy'
 
 /**
  * How a player's Steam identity was established.
- *  - status:      the Steam ID was printed by `status` (community / FACEIT servers).
- *  - faceit_name: resolved by exact FACEIT nickname match (Valve servers hide ids). Unverified.
- *  - self:        matched the configured local Steam ID by persona name.
- *  - none:        name only, nothing could be resolved.
+ *  - status:       the Steam ID was printed by `status` (community / FACEIT servers).
+ *  - faceit_name:  resolved by exact FACEIT nickname match (Valve servers hide ids). Unverified.
+ *  - faceit_match: taken from a FACEIT match roster (player_id + Steam64). Verified.
+ *  - self:         matched the configured local Steam ID by persona name.
+ *  - none:         name only, nothing could be resolved.
  */
-export type IdentitySource = 'status' | 'faceit_name' | 'leetify_match' | 'self' | 'none'
+export type IdentitySource = 'status' | 'faceit_name' | 'faceit_match' | 'leetify_match' | 'self' | 'none'
 
 /** A player as extracted from raw CS2 `status` output. */
 export interface LobbyPlayer {
@@ -223,6 +224,8 @@ export interface ScoutPlayer {
   watched: boolean
   /** Per-match scoreboard numbers when the lobby comes from an imported Valve match. */
   matchStats?: MatchPlayerStats
+  /** FACEIT faction when the lobby comes from a FACEIT match (drives neutral grouping). */
+  faction?: 'faction1' | 'faction2'
 }
 
 export interface MatchPlayerStats {
@@ -306,12 +309,25 @@ export interface ImportResult {
   backfilled: number
 }
 
+/** Context of a FACEIT match the lobby was loaded from. */
+export interface FaceitMatchContext {
+  matchId: string
+  /** READY | VOTING | CONFIGURING | ONGOING | FINISHED | ... */
+  status: string
+  /** voting.map.pick[0] when the veto produced a map. */
+  mapPick?: string
+  factionNames: { faction1: string; faction2: string }
+  faceitUrl?: string
+}
+
 export interface LobbySession {
   id: number
   createdAt: string
-  source: 'paste' | 'clipboard' | 'steam_history'
+  source: 'paste' | 'clipboard' | 'steam_history' | 'faceit_match'
   /** Present when the session shows an imported match. */
   match?: MatchSummary
+  /** Present when the session was loaded from a FACEIT match room. */
+  faceitMatch?: FaceitMatchContext
   officialServer: boolean
   map?: string
   players: ScoutPlayer[]

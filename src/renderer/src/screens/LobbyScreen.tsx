@@ -10,20 +10,30 @@ interface Props {
   loading: boolean
   error?: string
   onLoad: (raw: string) => Promise<void>
-  onImport: () => Promise<string | undefined>
   onSelect: (steamId: string) => void
   onSetTeam: (steamId: string, team: Team) => void
 }
 
 interface Group {
-  key: Team
+  key: Team | 'faction1' | 'faction2'
   title: string
   players: ScoutPlayer[]
 }
 
-function groupPlayers(players: ScoutPlayer[]): Group[] {
+function groupPlayers(players: ScoutPlayer[], session?: LobbySession): Group[] {
   const assigned = players.some((p) => p.team !== 'unknown')
-  if (!assigned) return [{ key: 'unknown', title: 'Match players', players }]
+  if (!assigned) {
+    // FACEIT match of someone else: neutral grouping by faction nickname, no "you" marker.
+    const fm = session?.faceitMatch
+    if (fm && players.some((p) => p.faction)) {
+      const groups: Group[] = [
+        { key: 'faction1', title: fm.factionNames.faction1, players: players.filter((p) => p.faction === 'faction1') },
+        { key: 'faction2', title: fm.factionNames.faction2, players: players.filter((p) => p.faction === 'faction2') }
+      ]
+      return groups.filter((g) => g.players.length > 0)
+    }
+    return [{ key: 'unknown', title: 'Match players', players }]
+  }
   const groups: Group[] = [
     { key: 'enemy', title: 'Enemy team', players: players.filter((p) => p.team === 'enemy') },
     { key: 'mine', title: 'Your team', players: players.filter((p) => p.team === 'mine') },
@@ -32,21 +42,9 @@ function groupPlayers(players: ScoutPlayer[]): Group[] {
   return groups.filter((g) => g.players.length > 0)
 }
 
-export function LobbyScreen({ session, players, selectedId, showScore, loading, error, onLoad, onImport, onSelect, onSetTeam }: Props): JSX.Element {
+export function LobbyScreen({ session, players, selectedId, showScore, loading, error, onLoad, onSelect, onSetTeam }: Props): JSX.Element {
   const [raw, setRaw] = useState('')
   const [open, setOpen] = useState(players.length === 0)
-  const [importing, setImporting] = useState(false)
-  const [importMsg, setImportMsg] = useState<string | undefined>()
-
-  const doImport = async (): Promise<void> => {
-    setImporting(true)
-    setImportMsg(undefined)
-    try {
-      setImportMsg(await onImport())
-    } finally {
-      setImporting(false)
-    }
-  }
 
   const submit = async (): Promise<void> => {
     if (!raw.trim()) return
@@ -78,11 +76,9 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
           <button className="btn" onClick={() => setOpen((o) => !o)}>
             {open ? 'Hide text box' : 'Paste manually'}
           </button>
-          <button className="btn" onClick={doImport} disabled={importing} title="Identify the players of your last Valve match through Leetify">
-            {importing ? 'Importing…' : 'Import last match'}
-          </button>
           <span className="hint">
-            In CS2 open the console (<code>~</code>), run <code>status</code>, select the output and copy it.
+            In CS2 open the console (<code>~</code>), run <code>status</code>, select the output and copy it. On FACEIT, copy the match room
+            URL instead.
           </span>
         </div>
         {open && (
@@ -90,7 +86,7 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
             <textarea
               value={raw}
               onChange={(e) => setRaw(e.target.value)}
-              placeholder={'Paste the output of the CS2 `status` command here…'}
+              placeholder={'Paste CS2 `status` output or a FACEIT match room URL here…'}
               spellCheck={false}
             />
             <div className="paste-actions">
@@ -104,9 +100,14 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
           </>
         )}
         {error && <div style={{ color: 'var(--danger)' }}>{error}</div>}
-        {importMsg && <div className="dim">{importMsg}</div>}
       </div>
 
+      {session?.faceitMatch && (
+        <div className="notice">
+          <b>FACEIT match</b> · {session.faceitMatch.status}
+          {session.faceitMatch.mapPick ? <> · {session.faceitMatch.mapPick}</> : null}. Identities come verified from the match roster.
+        </div>
+      )}
       {session?.match && (
         <div className="notice">
           <b>Imported match</b> · {session.match.mode} on {session.match.map ?? '?'} · {session.match.myScore ?? '–'} : {session.match.theirScore ?? '–'} (
@@ -117,8 +118,7 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
         <div className="notice">
           <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
           exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with
-          the same name. After the match, <b>Import last match</b> identifies all ten players exactly and pulls their Premier rating and stats
-          out of the match itself — they do not need an account anywhere.
+          the same name.
         </div>
       )}
 
@@ -135,14 +135,18 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
               Click <b>Paste lobby</b> here, or let clipboard detection pick it up
             </li>
           </ol>
+          <div>
+            On FACEIT: copy the match room URL (<code>faceit.com/…/cs2/room/…</code>) during the veto and paste it here — the full lobby
+            loads before the game starts.
+          </div>
         </div>
       ) : (
-        groupPlayers(players).map((g) => (
+        groupPlayers(players, session).map((g) => (
           <div key={g.key} className={`group ${g.key}`}>
             <h2 className="group-title">
               {g.title} <span className="faint">({g.players.length})</span> <span className="line" />
             </h2>
-            <PlayerTable players={g.players} selectedId={selectedId} showScore={showScore} map={session?.map} onSelect={onSelect} onCycleTeam={onSetTeam} />
+            <PlayerTable players={g.players} selectedId={selectedId} showScore={showScore} onSelect={onSelect} onCycleTeam={onSetTeam} />
           </div>
         ))
       )}

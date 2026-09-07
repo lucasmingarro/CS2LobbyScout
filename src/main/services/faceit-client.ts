@@ -1,4 +1,4 @@
-import type { FaceitInfo } from '@shared/types'
+import type { FaceitInfo, FaceitMatchContext, Team } from '@shared/types'
 import { ApiError, type RequestManager } from './request-manager'
 import { TTL, type CacheStore } from './cache'
 import { logger } from '../logger'
@@ -38,6 +38,47 @@ export interface FaceitLookupResult {
   info?: FaceitInfo
 }
 
+/** `GET /matches/{match_id}` — only the fields this app consumes. */
+export interface FaceitMatchRosterEntry {
+  player_id: string
+  nickname: string
+  avatar?: string
+  skill_level?: number
+  /** Steam64 of the player. */
+  game_player_id?: string
+  game_player_name?: string
+}
+
+export interface FaceitMatchFaction {
+  nickname?: string
+  roster?: FaceitMatchRosterEntry[]
+}
+
+export interface FaceitMatchResponse {
+  match_id: string
+  status?: string
+  teams?: { faction1?: FaceitMatchFaction; faction2?: FaceitMatchFaction }
+  voting?: { map?: { pick?: string[] } }
+  faceit_url?: string
+}
+
+export interface FaceitMatchResult {
+  status: FaceitLookupStatus
+  match?: FaceitMatchResponse
+}
+
+/** A roster entry mapped to lobby-player shape, plus its faction and team. */
+export interface FaceitLobbyPlayer {
+  steamId: string
+  playerId: string
+  nickname: string
+  avatarUrl?: string
+  level?: number
+  faction: 'faction1' | 'faction2'
+  team: Team
+  isLocal: boolean
+}
+
 const num = (v: unknown): number | undefined => {
   if (v === undefined || v === null || v === '') return undefined
   const n = typeof v === 'number' ? v : Number(String(v).replace('%', ''))
@@ -51,6 +92,49 @@ function pick(obj: Record<string, unknown> | undefined, ...keys: string[]): numb
     if (v !== undefined) return v
   }
   return undefined
+}
+
+/**
+ * Converts a `/matches/{match_id}` response into lobby players plus the match
+ * context. Identities come verified from the roster (player_id + Steam64). The
+ * faction whose roster contains `mySteamId` becomes `mine` and the other
+ * `enemy`; when neither does, every player stays `unknown` and the UI groups
+ * by faction using the faction nicknames.
+ */
+export function toFaceitLobby(raw: FaceitMatchResponse, mySteamId?: string): { players: FaceitLobbyPlayer[]; context: FaceitMatchContext } {
+  const factions: Array<'faction1' | 'faction2'> = ['faction1', 'faction2']
+  const rosterOf = (f: 'faction1' | 'faction2'): FaceitMatchRosterEntry[] =>
+    (raw.teams?.[f]?.roster ?? []).filter((e) => !!e.game_player_id && /^7656119\d{10}$/.test(e.game_player_id))
+  const myFaction = mySteamId ? factions.find((f) => rosterOf(f).some((e) => e.game_player_id === mySteamId)) : undefined
+
+  const players: FaceitLobbyPlayer[] = []
+  for (const faction of factions) {
+    const team: Team = myFaction === undefined ? 'unknown' : faction === myFaction ? 'mine' : 'enemy'
+    for (const e of rosterOf(faction)) {
+      players.push({
+        steamId: e.game_player_id!,
+        playerId: e.player_id,
+        nickname: e.nickname,
+        avatarUrl: e.avatar || undefined,
+        level: e.skill_level,
+        faction,
+        team,
+        isLocal: !!mySteamId && e.game_player_id === mySteamId
+      })
+    }
+  }
+
+  const context: FaceitMatchContext = {
+    matchId: raw.match_id,
+    status: raw.status ?? 'UNKNOWN',
+    mapPick: raw.voting?.map?.pick?.[0],
+    factionNames: {
+      faction1: raw.teams?.faction1?.nickname || 'Faction 1',
+      faction2: raw.teams?.faction2?.nickname || 'Faction 2'
+    },
+    faceitUrl: raw.faceit_url ? raw.faceit_url.replace('{lang}', 'en') : undefined
+  }
+  return { players, context }
 }
 
 export class FaceitClient {
@@ -81,6 +165,44 @@ export class FaceitClient {
     }
     if (profile.notFound) return { status: 'not_found' }
     return { status: 'ok', info: await this.enrich(profile.player, key, options.bypassCache) }
+  }
+
+  /**
+   * Look up by FACEIT player id. Used when the id is already verified (e.g. a
+   * match roster), skipping any identity-resolution request.
+   */
+  async lookupById(playerId: string, options: { bypassCache?: boolean } = {}): Promise<FaceitLookupResult> {
+    const key = this.getKey()
+    if (!key) return { status: 'unavailable' }
+    let profile: CachedProfile | undefined
+    try {
+      profile = await this.profile(`faceit:player:${playerId}`, `${API}/players/${encodeURIComponent(playerId)}`, key, options.bypassCache)
+    } catch (err) {
+      logger.warn('faceit.profile_failed', { playerId, error: (err as Error).message })
+      return { status: 'unavailable' }
+    }
+    if (profile.notFound) return { status: 'not_found' }
+    return { status: 'ok', info: await this.enrich(profile.player, key, options.bypassCache) }
+  }
+
+  /** `GET /matches/{match_id}`. Cached briefly: a live match changes state. */
+  async match(matchId: string): Promise<FaceitMatchResult> {
+    const key = this.getKey()
+    if (!key) return { status: 'unavailable' }
+    const cacheKey = `faceit:match:${matchId}`
+    const cached = this.cache.get<FaceitMatchResponse>(cacheKey)
+    if (cached) return { status: 'ok', match: cached }
+    try {
+      const match = await this.rm.getJson<FaceitMatchResponse>(cacheKey, `${API}/matches/${encodeURIComponent(matchId)}`, {
+        headers: this.headers(key)
+      })
+      this.cache.set(cacheKey, match, TTL.faceitStats)
+      return { status: 'ok', match }
+    } catch (err) {
+      if (err instanceof ApiError && (err.kind === 'not_found' || err.kind === 'bad_request')) return { status: 'not_found' }
+      logger.warn('faceit.match_failed', { matchId, error: (err as Error).message })
+      return { status: 'unavailable' }
+    }
   }
 
   /**

@@ -15,9 +15,13 @@ import type {
 } from '@shared/types'
 
 export interface LobbyDetectedEvent {
+  /** What the clipboard watcher recognized. */
+  kind: 'status' | 'faceit_room'
   autoLoaded: boolean
   session?: LobbySession
   raw?: string
+  /** FACEIT match id when kind is 'faceit_room'. */
+  matchId?: string
   playerCount: number
 }
 
@@ -46,6 +50,8 @@ const api = {
   parsePreview: (raw: string): Promise<ParsedLobby> => ipcRenderer.invoke(IPC.LOBBY_PARSE_PREVIEW, raw),
   loadLobby: (raw: string, source: 'paste' | 'clipboard' = 'paste'): Promise<LobbySession> =>
     ipcRenderer.invoke(IPC.LOBBY_LOAD, raw, source),
+  /** Loads the lobby of a FACEIT match from a room URL or a bare `1-<uuid>` id. */
+  loadFaceitMatch: (urlOrId: string): Promise<LobbySession> => ipcRenderer.invoke(IPC.FACEIT_MATCH_LOAD, urlOrId),
   /** `key` is ScoutPlayer.key (Steam64 when known, otherwise a name key). */
   setTeam: (key: string, team: Team): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.LOBBY_SET_TEAM, key, team),
   refreshPlayer: (key: string): Promise<ScoutPlayer | undefined> => ipcRenderer.invoke(IPC.PLAYER_REFRESH, key),

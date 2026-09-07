@@ -4,6 +4,7 @@ export const IPC = {
   LOBBY_PARSE_PREVIEW: 'lobby:parse-preview',
   LOBBY_LOAD: 'lobby:load',
   LOBBY_SET_TEAM: 'lobby:set-team',
+  FACEIT_MATCH_LOAD: 'faceit:load-match',
   PLAYER_REFRESH: 'player:refresh',
   PLAYER_HISTORY: 'player:history',
   PLAYER_WATCH: 'player:watch',

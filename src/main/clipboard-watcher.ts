@@ -1,16 +1,22 @@
 import { clipboard } from 'electron'
 import { isLikelyStatusOutput, parseStatus } from '@shared/lobby-parser'
+import { extractFaceitMatchId } from '@shared/faceit-room'
 import { logger } from './logger'
 
 export interface ClipboardDetection {
+  kind: 'status' | 'faceit_room'
   raw: string
   playerCount: number
+  /** Dedupe hash: the parsed status hash, or the FACEIT match id. */
   rawHash: string
+  /** Set when kind is 'faceit_room'. */
+  matchId?: string
 }
 
 /**
  * Polls the system clipboard and reports text that looks like CS2 `status`
- * output. Electron has no clipboard change event, so a cheap 1s poll is used.
+ * output or contains a FACEIT match room URL. Electron has no clipboard
+ * change event, so a cheap 1s poll is used.
  */
 export class ClipboardWatcher {
   private timer?: NodeJS.Timeout
@@ -57,11 +63,19 @@ export class ClipboardWatcher {
     }
     if (text === this.lastText) return
     this.lastText = text
+    const matchId = extractFaceitMatchId(text)
+    if (matchId) {
+      if (matchId === this.lastHash) return
+      this.lastHash = matchId
+      logger.info('clipboard.detected_faceit_room', { matchId })
+      this.onDetect({ kind: 'faceit_room', raw: text, playerCount: 0, rawHash: matchId, matchId })
+      return
+    }
     if (!isLikelyStatusOutput(text)) return
     const parsed = parseStatus(text)
     if (parsed.rawHash === this.lastHash) return
     this.lastHash = parsed.rawHash
     logger.info('clipboard.detected', { players: parsed.players.length })
-    this.onDetect({ raw: text, playerCount: parsed.players.length, rawHash: parsed.rawHash })
+    this.onDetect({ kind: 'status', raw: text, playerCount: parsed.players.length, rawHash: parsed.rawHash })
   }
 }

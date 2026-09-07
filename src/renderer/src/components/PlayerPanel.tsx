@@ -49,7 +49,6 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
 
   const s = p.steam
   const f = p.faceit
-  const v = p.valve
   const bans = (s?.vacBans ?? 0) + (s?.gameBans ?? 0)
   const fmtRating = (x: number | undefined): string => (x === undefined ? '–' : `${x >= 0 ? '+' : ''}${x.toFixed(2)}`)
   const srcTag: Record<string, string> = { faceit: 'FACEIT', valve: 'Valve', account: 'Account' }
@@ -83,12 +82,10 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
               {scoreAvailable(p) ? (
                 <>
                   <div className={`level-text ${p.scout.level}`}>{levelLabel(p.scout.level)} statistical anomaly</div>
-                  <div className="faint">
-                    Valve {p.scout.valveScore ?? '–'} · FACEIT {p.scout.faceitScore ?? '–'} (overall = higher of the two)
-                  </div>
+                  <div className="faint">FACEIT {p.scout.faceitScore ?? '–'}</div>
                 </>
               ) : (
-                <div className="faint">Valve (Leetify) or FACEIT statistics are required to compute a score.</div>
+                <div className="faint">FACEIT statistics are required to compute a score.</div>
               )}
             </div>
           </div>
@@ -186,107 +183,6 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
         </Section>
       )}
 
-      <Section title={`Valve · ${sourceLabel[p.sources.valve]}`}>
-        {v ? (
-          <dl className="kv">
-            <dt>Data from</dt>
-            <dd className="faint">
-              {v.source === 'matches'
-                ? `${v.sampleMatches} imported match(es)`
-                : v.source === 'mixed'
-                  ? `Leetify profile + ${v.sampleMatches} match(es)`
-                  : 'Leetify profile'}
-            </dd>
-            <dt>Premier rating</dt>
-            <dd className="premier">
-              {fmtInt(v.premierRating)}
-              {v.premierRatingThen !== undefined && <span className="faint"> (from {fmtInt(v.premierRatingThen)})</span>}
-            </dd>
-            {v.premierWins !== undefined && (
-              <>
-                <dt>Premier wins</dt>
-                <dd>{fmtInt(v.premierWins)}</dd>
-              </>
-            )}
-            {v.kd !== undefined && (
-              <>
-                <dt>KD · ADR</dt>
-                <dd>
-                  {fmtNum(v.kd)} · {fmtInt(v.adr)}
-                </dd>
-              </>
-            )}
-            <dt>Leetify rating</dt>
-            <dd>{fmtRating(v.leetifyRating)}</dd>
-            <dt>Matches</dt>
-            <dd>{fmtInt(v.totalMatches)}</dd>
-            <dt>Win rate</dt>
-            <dd>{fmtPct(v.winRate)}</dd>
-            <dt>Pre-aim</dt>
-            <dd>{v.preaim !== undefined ? `${v.preaim.toFixed(1)}°` : '–'}</dd>
-            <dt>Reaction time</dt>
-            <dd>{v.reactionTimeMs !== undefined ? `${fmtInt(v.reactionTimeMs)} ms` : '–'}</dd>
-            <dt>Headshot accuracy</dt>
-            <dd>{fmtPct(v.headshotAccuracy)}</dd>
-            <dt>Spray accuracy</dt>
-            <dd>{fmtPct(v.sprayAccuracy)}</dd>
-            {v.ratings && (
-              <>
-                <dt>Aim / Positioning / Utility</dt>
-                <dd>
-                  {fmtInt(v.ratings.aim)} / {fmtInt(v.ratings.positioning)} / {fmtInt(v.ratings.utility)}
-                </dd>
-              </>
-            )}
-            {v.recent && (
-              <>
-                <dt>Last {v.recent.matches} matches</dt>
-                <dd>
-                  {v.recent.wins}W {v.recent.losses}L {v.recent.ties}T · {fmtRating(v.recent.avgLeetifyRating)}
-                </dd>
-                {v.recent.premierNow !== undefined && v.recent.premierThen !== undefined && (
-                  <>
-                    <dt>Premier trend</dt>
-                    <dd>
-                      {fmtInt(v.recent.premierThen)} → {fmtInt(v.recent.premierNow)}
-                    </dd>
-                  </>
-                )}
-              </>
-            )}
-            {v.competitiveRanks && Object.values(v.competitiveRanks).some((r) => r > 0) && (
-              <>
-                <dt>Competitive ranks</dt>
-                <dd className="faint" style={{ whiteSpace: 'normal' }}>
-                  {Object.entries(v.competitiveRanks)
-                    .filter(([, r]) => r > 0)
-                    .map(([m, r]) => `${m.replace(/^(de|cs)_/, '')} ${r}`)
-                    .join(' · ')}
-                </dd>
-              </>
-            )}
-            {v.headshotPercentage !== undefined && (
-              <>
-                <dt>Headshot %</dt>
-                <dd>{fmtPct(v.headshotPercentage)}</dd>
-              </>
-            )}
-            {v.firstMatchAt && (
-              <>
-                <dt>First Valve match seen</dt>
-                <dd>{fmtDate(v.firstMatchAt)}</dd>
-              </>
-            )}
-          </dl>
-        ) : (
-          <div className="dim">
-            {p.sources.valve === 'not_found' || p.sources.valve === 'ok'
-              ? 'No Valve data yet. Import the match this player was in (Matches tab) — imported matches carry the Premier rating and stats of all ten players, whether or not they use Leetify.'
-              : sourceLabel[p.sources.valve]}
-          </div>
-        )}
-      </Section>
-
       <Section title={`FACEIT · ${sourceLabel[p.sources.faceit]}`}>
         {f ? (
           <dl className="kv">
@@ -372,11 +268,6 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
         {f?.profileUrl && (
           <button className="btn" onClick={() => void window.scout.openExternal(f.profileUrl!)}>
             FACEIT profile
-          </button>
-        )}
-        {v?.profileUrl && (
-          <button className="btn" onClick={() => void window.scout.openExternal(v.profileUrl!)}>
-            Leetify profile
           </button>
         )}
       </div>
