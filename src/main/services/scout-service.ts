@@ -1,11 +1,11 @@
-import type { IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team, ValveInfo } from '@shared/types'
+import type { FaceitMatchContext, IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team, ValveInfo } from '@shared/types'
 import { parseStatus } from '@shared/lobby-parser'
 import { computeScore, ENGINE_VERSION } from '@shared/scout-engine'
 import { IPC } from '@shared/ipc'
 import type { Repositories } from '../db/repositories'
 import type { ConfigStore } from '../config'
 import type { SteamClient } from './steam-client'
-import type { FaceitClient } from './faceit-client'
+import { toFaceitLobby, type FaceitClient } from './faceit-client'
 import { toImportedMatch, type LeetifyClient } from './leetify-client'
 import { errorFields, logger } from '../logger'
 
@@ -42,11 +42,12 @@ export function mergeValve(profile: ValveInfo | undefined, local: ValveInfo | un
 interface ActiveSession {
   id?: number
   createdAt: string
-  source: 'paste' | 'clipboard' | 'steam_history'
+  source: 'paste' | 'clipboard' | 'steam_history' | 'faceit_match'
   rawHash: string
   officialServer: boolean
   map?: string
   match?: MatchSummary
+  faceitMatch?: FaceitMatchContext
   saveHistory: boolean
   players: Map<string, ScoutPlayer>
 }
@@ -90,6 +91,7 @@ export class ScoutService {
       officialServer: s.officialServer,
       map: s.map,
       match: s.match,
+      faceitMatch: s.faceitMatch,
       players: [...s.players.values()]
     }
   }
@@ -180,6 +182,79 @@ export class ScoutService {
     return snapshot
   }
 
+  /**
+   * Builds a lobby from a FACEIT match room. Identities come verified from the
+   * roster (player_id + Steam64), so enrichment skips identity resolution
+   * entirely; teams are separated against the configured Steam ID.
+   */
+  async loadFaceitMatch(matchId: string): Promise<LobbySession> {
+    if (!this.faceit.hasKey()) {
+      throw new Error('Loading a FACEIT match needs a FACEIT API key. Add it in Settings.')
+    }
+    const res = await this.faceit.match(matchId)
+    if (res.status === 'not_found') {
+      throw new Error(`Match ${matchId} was not found on FACEIT. Check the room URL.`)
+    }
+    if (res.status !== 'ok' || !res.match) {
+      throw new Error('FACEIT could not be reached. Try again in a moment.')
+    }
+
+    const settings = this.config.getSettings()
+    const mySteamId = settings.mySteamId || undefined
+    const { players: roster, context } = toFaceitLobby(res.match, mySteamId)
+    if (roster.length === 0) {
+      throw new Error('The FACEIT match has no players with a Steam ID in its roster.')
+    }
+
+    logger.info('faceit.match_load', { matchId, players: roster.length, status: context.status, map: context.mapPick })
+
+    const saveHistory = settings.saveEncounterHistory
+    const rawHash = `faceit:${matchId}`
+    const sessionId = saveHistory ? this.repos.createSession('faceit_match', rawHash) : undefined
+
+    const players = new Map<string, ScoutPlayer>()
+    for (const rp of roster) {
+      players.set(rp.steamId, {
+        key: rp.steamId,
+        steamId: rp.steamId,
+        identity: 'faceit_match',
+        name: rp.nickname,
+        avatarUrl: rp.avatarUrl,
+        team: rp.team,
+        faction: rp.faction,
+        isLocal: rp.isLocal,
+        faceit: { playerId: rp.playerId, nickname: rp.nickname, avatarUrl: rp.avatarUrl, level: rp.level },
+        scout: computeScore({}),
+        history: { timesSeen: 0, previousScores: [] },
+        sources: {
+          steam: this.steam.hasKey() ? 'pending' : 'no_key',
+          faceit: 'pending',
+          valve: 'pending',
+          history: 'ok'
+        },
+        watched: false
+      })
+    }
+
+    const session: ActiveSession = {
+      id: sessionId,
+      createdAt: new Date().toISOString(),
+      source: 'faceit_match',
+      rawHash,
+      officialServer: false,
+      map: context.mapPick,
+      faceitMatch: context,
+      saveHistory,
+      players
+    }
+    for (const player of players.values()) this.registerIdentified(session, player)
+    this.session = session
+
+    const snapshot = this.toLobbySession(session)
+    void this.enrichAll(session, [...players.keys()], false)
+    return snapshot
+  }
+
   /** Once a player has a Steam64, record the sighting and load their history. */
   private registerIdentified(session: ActiveSession, player: ScoutPlayer): void {
     if (!player.steamId) return
@@ -249,7 +324,12 @@ export class ScoutService {
   private async enrichFaceit(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
     if (!this.faceit.hasKey()) return
     try {
-      if (player.steamId) {
+      if (player.faceit?.playerId) {
+        // Verified identity (match roster): enrich by player_id, no resolution.
+        const r = await this.faceit.lookupById(player.faceit.playerId, { bypassCache })
+        player.sources.faceit = r.status
+        if (r.status === 'ok' && r.info) player.faceit = r.info
+      } else if (player.steamId) {
         const r = await this.faceit.lookup(player.steamId, { bypassCache })
         player.sources.faceit = r.status
         if (r.status === 'ok' && r.info) player.faceit = r.info

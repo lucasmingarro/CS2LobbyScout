@@ -1,6 +1,7 @@
 import { BrowserWindow, ipcMain, shell } from 'electron'
 import { IPC } from '@shared/ipc'
 import { parseStatus } from '@shared/lobby-parser'
+import { extractFaceitMatchId } from '@shared/faceit-room'
 import type { AppSettings, Team } from '@shared/types'
 import type { AppContext } from './context'
 import { errorFields, logger, setDebug } from './logger'
@@ -22,6 +23,19 @@ export function registerIpc(ctx: AppContext): void {
   })
 
   ipcMain.handle(IPC.LOBBY_SET_TEAM, (_e, key: string, team: Team) => scout.setTeam(key, team))
+
+  ipcMain.handle(IPC.FACEIT_MATCH_LOAD, async (_e, urlOrId: string) => {
+    const matchId = extractFaceitMatchId(String(urlOrId ?? ''))
+    if (!matchId) {
+      throw new Error('Not a FACEIT match room. Expected a URL like https://www.faceit.com/en/cs2/room/1-… or a 1-<uuid> match id.')
+    }
+    if (!config.keyStatus().faceit) {
+      throw new Error('Loading a FACEIT match needs a FACEIT API key. Add it in Settings.')
+    }
+    const session = await scout.loadFaceitMatch(matchId)
+    clipboardWatcher.markHandled(matchId)
+    return session
+  })
 
   ipcMain.handle(IPC.PLAYER_REFRESH, (_e, key: string) => scout.refreshPlayer(key))
 

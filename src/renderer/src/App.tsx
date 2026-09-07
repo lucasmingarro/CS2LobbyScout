@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from 'react'
 import type { ApiKeyStatus, AppSettings, LobbySession, ScoutPlayer, Team } from '@shared/types'
 import { DEFAULT_SETTINGS } from '@shared/types'
+import { extractFaceitMatchId } from '@shared/faceit-room'
 import { LobbyScreen } from './screens/LobbyScreen'
 import { WatchedScreen } from './screens/WatchedScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
@@ -62,7 +63,19 @@ export default function App(): JSX.Element {
       window.scout.onLobbyDetected((e) => {
         if (e.autoLoaded && e.session) {
           applySession(e.session)
-          pushToast({ kind: 'info', title: `Lobby loaded from clipboard (${e.playerCount} players)` })
+          pushToast({
+            kind: 'info',
+            title: e.kind === 'faceit_room' ? 'FACEIT match loaded from clipboard' : `Lobby loaded from clipboard (${e.playerCount} players)`
+          })
+        } else if (e.kind === 'faceit_room' && e.matchId) {
+          const matchId = e.matchId
+          pushToast({
+            kind: 'info',
+            title: 'FACEIT match room detected',
+            body: 'Load the match lobby?',
+            actionLabel: 'Load',
+            onAction: () => void loadLobby(matchId, 'clipboard')
+          })
         } else if (e.raw) {
           const raw = e.raw
           pushToast({
@@ -95,7 +108,9 @@ export default function App(): JSX.Element {
     setLoading(true)
     setError(undefined)
     try {
-      const s = await window.scout.loadLobby(raw, source)
+      // A FACEIT room URL (or bare match id) routes to the match load; anything else is `status` text.
+      const matchId = extractFaceitMatchId(raw)
+      const s = matchId ? await window.scout.loadFaceitMatch(matchId) : await window.scout.loadLobby(raw, source)
       applySession(s)
     } catch (err) {
       const msg = (err as Error).message.replace(/^.*Error: /, '')
@@ -197,7 +212,6 @@ export default function App(): JSX.Element {
               loading={loading}
               error={error}
               onLoad={(raw) => loadLobby(raw, 'paste')}
-              onImport={importMatches}
               onSelect={(id) => setSelectedId((cur) => (cur === id ? undefined : id))}
               onSetTeam={setTeam}
             />

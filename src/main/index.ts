@@ -62,17 +62,35 @@ function buildContext(): AppContext {
   const clipboardWatcher = new ClipboardWatcher((d) => {
     const s = config.getSettings()
     if (d.rawHash === scout.currentRawHash()) return
+    if (d.kind === 'faceit_room' && d.matchId) {
+      const matchId = d.matchId
+      if (s.autoLoadDetectedLobby) {
+        scout
+          .loadFaceitMatch(matchId)
+          .then((session) => {
+            clipboardWatcher.markHandled(matchId)
+            emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'faceit_room', autoLoaded: true, session, matchId, playerCount: session.players.length })
+          })
+          .catch((err) => {
+            logger.warn('clipboard.autoload_failed', errorFields(err))
+            emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'faceit_room', autoLoaded: false, raw: d.raw, matchId, playerCount: d.playerCount })
+          })
+        return
+      }
+      emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'faceit_room', autoLoaded: false, raw: d.raw, matchId, playerCount: d.playerCount })
+      return
+    }
     if (s.autoLoadDetectedLobby) {
       scout
         .loadLobby(d.raw, 'clipboard')
-        .then((session) => emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: true, session, playerCount: d.playerCount }))
+        .then((session) => emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'status', autoLoaded: true, session, playerCount: d.playerCount }))
         .catch((err) => {
           logger.warn('clipboard.autoload_failed', errorFields(err))
-          emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
+          emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'status', autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
         })
       return
     }
-    emitToRenderer(IPC.EVT_LOBBY_DETECTED, { autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
+    emitToRenderer(IPC.EVT_LOBBY_DETECTED, { kind: 'status', autoLoaded: false, raw: d.raw, playerCount: d.playerCount })
   })
 
   const keyStatus = config.keyStatus()
