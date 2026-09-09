@@ -108,13 +108,7 @@ export function LobbyScreen({ session, players, selectedId, showScore, loading, 
           {session.faceitMatch.mapPick ? <> · {session.faceitMatch.mapPick}</> : null}. Identities come verified from the match roster.
         </div>
       )}
-      {session?.match && (
-        <div className="notice">
-          <b>Imported match</b> · {session.match.mode} on {session.match.map ?? '?'} · {session.match.myScore ?? '–'} : {session.match.theirScore ?? '–'} (
-          {session.match.result ?? 'unknown'}). Teams and per-match K/D come from the match itself.
-        </div>
-      )}
-      {session?.officialServer && !session.match && players.length > 0 && (
+      {session?.officialServer && players.length > 0 && (
         <div className="notice">
           <b>Official Valve server:</b> CS2 hides Steam IDs in <code>status</code> on Valve matchmaking. Players are matched to FACEIT by
           exact nickname, which is unverified. Rows marked <span className="tag unverified">via faceit</span> may be a different person with

@@ -1,34 +1,31 @@
-import type { FaceitInfo, ScoutResult, ScoutSignal, SteamInfo, ValveInfo } from './types'
+import type { FaceitInfo, ScoutResult, ScoutSignal, SteamInfo } from './types'
 import { scoreToLevel } from './types'
 
 /**
- * Suspicion Engine v1.1.
+ * Suspicion Engine.
  *
  * Deterministic, explainable, fixed-threshold scoring. It measures *statistical
  * anomaly*, never "cheating". Every point is attached to a signal with a human
- * readable explanation and a source (faceit / valve / account).
+ * readable explanation and a source (faceit / account).
  *
- * Two platform sub-scores are computed with the same philosophy and the overall
- * score is the higher of the two:
+ * The overall score is the FACEIT sub-score (max 100):
  *
- *   FACEIT (max 100)                  VALVE via Leetify (max 100)
- *   KD anomaly            0–25        Leetify rating         0–25
- *   ADR anomaly           0–20        Pre-aim (low)          0–20
- *   HS% anomaly           0–15        Reaction time (low)    0–15
- *   Win-rate anomaly      0–10        HS accuracy (high)     0–15
- *   Performance jump      0–10        Win-rate anomaly       0–5
- *   Account age*          0–10        Rating mismatch*       0–10
- *   Low match count*      0–10        Account age*           0–10
- *                                     Low match count*       0–10 (cap 100)
+ *   KD anomaly            0–25
+ *   ADR anomaly           0–20
+ *   HS% anomaly           0–15
+ *   Win-rate anomaly      0–10
+ *   Performance jump      0–10
+ *   Account age*          0–10
+ *   Low match count*      0–10
  *
- * (*) context signals: only count when the platform's performance points reach
+ * (*) context signals: only count when the performance points reach
  * CONTEXT_GATE. A new account with average stats scores 0.
  *
  * Rules: thresholds ramp linearly; small samples halve performance points;
  * missing data never adds points; existing bans are facts, not score.
  */
 
-export const ENGINE_VERSION = 2
+export const ENGINE_VERSION = 3
 
 export const THRESHOLDS = {
   faceit: {
@@ -42,24 +39,6 @@ export const THRESHOLDS = {
       minLifetimeMatches: 100,
       minRecentMatches: 10
     }
-  },
-  valve: {
-    /** Leetify rating in % (typical -5..+5, top players +5..+8). */
-    rating: { from: 3, to: 8, max: 25 },
-    /** Pre-aim in degrees: lower is better. Pros ~5-7, average ~12-15. */
-    preaim: { from: 6, to: 2.5, max: 20 },
-    /** Reaction time in ms: lower is better. Pros ~480-550, average ~650-750. */
-    reaction: { from: 480, to: 320, max: 15 },
-    /** Share of shots that hit the head. Average ~10-15, pros ~20-25. */
-    hsAccuracy: { from: 22, to: 40, max: 15 },
-    winRate: { from: 60, to: 80, max: 5 },
-    /** Strong aim metrics with a low Premier rating. */
-    mismatch: [
-      { belowRating: 10000, points: 10 },
-      { belowRating: 15000, points: 6 },
-      { belowRating: 20000, points: 3 }
-    ],
-    minPerfForMismatch: 20
   },
   accountAgeMonths: [
     { below: 3, points: 10 },
@@ -79,7 +58,6 @@ export const THRESHOLDS = {
 export interface ScoutInput {
   steam?: SteamInfo
   faceit?: FaceitInfo
-  valve?: ValveInfo
 }
 
 /** Linear ramp; works in both directions (from > to means "lower is worse"). */
@@ -122,20 +100,20 @@ function accountAgeRaw(ctx: AccountContext): number {
   return ctx.ageSource === 'faceit' ? Math.round(band.points * 0.6) : band.points
 }
 
-function matchCountPoints(matches: number | undefined, allowed: boolean, signals: ScoutSignal[], notes: string[], platform: 'faceit' | 'valve'): number {
+function matchCountPoints(matches: number | undefined, allowed: boolean, signals: ScoutSignal[], notes: string[]): number {
   if (matches === undefined) return 0
   const band = THRESHOLDS.matchCount.find((b) => matches < b.below)
   if (!band) return 0
   if (!allowed) {
-    notes.push(`Low ${platform} match count (${matches}) ignored: no performance anomaly to combine with.`)
+    notes.push(`Low faceit match count (${matches}) ignored: no performance anomaly to combine with.`)
     return 0
   }
   signals.push({
-    type: `${platform}_low_match_count`,
-    source: platform,
+    type: 'faceit_low_match_count',
+    source: 'faceit',
     label: matches < 50 ? 'Very low match count' : 'Low match count',
     points: band.points,
-    explanation: `${matches} ${platform === 'faceit' ? 'FACEIT' : 'Valve'} matches with above-threshold performance stats.`
+    explanation: `${matches} FACEIT matches with above-threshold performance stats.`
   })
   return band.points
 }
@@ -143,7 +121,7 @@ function matchCountPoints(matches: number | undefined, allowed: boolean, signals
 export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutResult {
   const signals: ScoutSignal[] = []
   const notes: string[] = []
-  const { steam: s, faceit: f, valve: v } = input
+  const { steam: s, faceit: f } = input
   const account = accountContext(s, f, now)
   if (account.ageNote) notes.push(account.ageNote)
 
@@ -154,13 +132,7 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
     accountAge: 0,
     matchCount: 0,
     winRate: 0,
-    performanceJump: 0,
-    valveRating: 0,
-    valvePreaim: 0,
-    valveReaction: 0,
-    valveHsAccuracy: 0,
-    valveRatingMismatch: 0,
-    valveKd: 0
+    performanceJump: 0
   }
 
   // =========================== FACEIT sub-score ===============================
@@ -252,7 +224,7 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
         })
     }
 
-    components.matchCount = matchCountPoints(matches, allowed, signals, notes, 'faceit')
+    components.matchCount = matchCountPoints(matches, allowed, signals, notes)
 
     faceitScore = Math.min(
       100,
@@ -261,147 +233,25 @@ export function computeScore(input: ScoutInput, now: Date = new Date()): ScoutRe
   } else if (f) notes.push('FACEIT account found but no CS2 statistics.')
   else notes.push('No FACEIT data.')
 
-  // =========================== VALVE sub-score ================================
-  let valveScore: number | undefined
-  let valveAllowed = false
-  const hasValveStats =
-    !!v && (v.leetifyRating !== undefined || v.preaim !== undefined || v.reactionTimeMs !== undefined || v.headshotAccuracy !== undefined || v.kd !== undefined)
-  if (hasValveStats) {
-    const T = THRESHOLDS.valve
-    const matches = v!.totalMatches ?? v!.sampleMatches
-    const smallSample = matches !== undefined && matches < THRESHOLDS.minReliableMatches
-    const factor = smallSample ? 0.5 : 1
-
-    if (v!.leetifyRating !== undefined) {
-      components.valveRating = Math.round(ramp(v!.leetifyRating, T.rating.from, T.rating.to, T.rating.max) * factor)
-      if (components.valveRating > 0)
-        signals.push({
-          type: 'valve_rating_high',
-          source: 'valve',
-          label: 'Very high Leetify rating',
-          points: components.valveRating,
-          explanation: `Leetify rating ${v!.leetifyRating >= 0 ? '+' : ''}${fmt(v!.leetifyRating)} in Valve matches (points start at +${T.rating.from}, max at +${T.rating.to}).`
-        })
-    }
-    if (v!.preaim !== undefined && v!.preaim > 0) {
-      components.valvePreaim = Math.round(ramp(v!.preaim, T.preaim.from, T.preaim.to, T.preaim.max) * factor)
-      if (components.valvePreaim > 0)
-        signals.push({
-          type: 'valve_preaim_low',
-          source: 'valve',
-          label: 'Unusually precise crosshair placement',
-          points: components.valvePreaim,
-          explanation: `Pre-aim ${fmt(v!.preaim, 1)}° (points start below ${T.preaim.from}°, max at ${T.preaim.to}°; pros are around 5-7°).`
-        })
-    }
-    if (v!.reactionTimeMs !== undefined && v!.reactionTimeMs > 0) {
-      components.valveReaction = Math.round(ramp(v!.reactionTimeMs, T.reaction.from, T.reaction.to, T.reaction.max) * factor)
-      if (components.valveReaction > 0)
-        signals.push({
-          type: 'valve_reaction_low',
-          source: 'valve',
-          label: 'Unusually fast reaction time',
-          points: components.valveReaction,
-          explanation: `Reaction time ${fmt(v!.reactionTimeMs, 0)} ms (points start below ${T.reaction.from} ms, max at ${T.reaction.to} ms).`
-        })
-    }
-    if (v!.kd !== undefined) {
-      const T2 = THRESHOLDS.faceit.kd
-      const pts = Math.round(ramp(v!.kd, T2.from, T2.to, T2.max) * factor * 0.6)
-      if (pts > 0) {
-        components.valveKd = pts
-        signals.push({
-          type: 'valve_kd_high',
-          source: 'valve',
-          label: v!.kd >= 1.7 ? 'Very high KD in Valve matches' : 'High KD in Valve matches',
-          points: pts,
-          explanation: `KD ${fmt(v!.kd)} across ${matches ?? '?'} Valve matches on record (points start at ${T2.from}).`
-        })
-      }
-    }
-    if (v!.headshotAccuracy !== undefined) {
-      components.valveHsAccuracy = Math.round(ramp(v!.headshotAccuracy, T.hsAccuracy.from, T.hsAccuracy.to, T.hsAccuracy.max) * factor)
-      if (components.valveHsAccuracy > 0)
-        signals.push({
-          type: 'valve_hs_accuracy_high',
-          source: 'valve',
-          label: 'Very high headshot accuracy',
-          points: components.valveHsAccuracy,
-          explanation: `${fmt(v!.headshotAccuracy, 1)}% of shots hit the head (points start at ${T.hsAccuracy.from}%, max at ${T.hsAccuracy.to}%).`
-        })
-    }
-    if (smallSample) notes.push(`Only ${matches} Valve matches on record: performance points halved (noisy sample).`)
-
-    const perf = components.valveRating + components.valvePreaim + components.valveReaction + components.valveHsAccuracy + components.valveKd
-    const allowed = perf >= THRESHOLDS.contextGate
-    valveAllowed = allowed
-
-    let valveWin = 0
-    if (v!.winRate !== undefined && matches !== undefined && matches >= 20) {
-      valveWin = Math.round(ramp(v!.winRate, T.winRate.from, T.winRate.to, T.winRate.max))
-      if (valveWin > 0)
-        signals.push({
-          type: 'valve_win_rate_high',
-          source: 'valve',
-          label: 'Unusual Valve win rate',
-          points: valveWin,
-          explanation: `Win rate ${fmt(v!.winRate, 0)}% over ${matches} Valve matches (points start at ${T.winRate.from}%).`
-        })
-    }
-
-    if (v!.premierRating !== undefined && v!.premierRating > 0 && perf >= T.minPerfForMismatch) {
-      const band = T.mismatch.find((b) => v!.premierRating! < b.belowRating)
-      if (band) {
-        components.valveRatingMismatch = band.points
-        signals.push({
-          type: 'valve_rating_mismatch',
-          source: 'valve',
-          label: 'Aim metrics do not match Premier rating',
-          points: band.points,
-          explanation: `Premier rating ${v!.premierRating} with aim metrics typical of much higher ratings.`
-        })
-      }
-    }
-
-    const valveMatchCount = matchCountPoints(matches, allowed, signals, notes, 'valve')
-    components.matchCount = Math.max(components.matchCount, valveMatchCount)
-
-    valveScore = Math.min(
-      100,
-      components.valveRating +
-        components.valvePreaim +
-        components.valveReaction +
-        components.valveHsAccuracy +
-        components.valveKd +
-        valveWin +
-        components.valveRatingMismatch +
-        valveMatchCount +
-        (allowed ? agePts : 0)
-    )
-    components.winRate = Math.max(components.winRate, valveWin)
-  } else if (v) notes.push('Valve profile found on Leetify but without statistics (private or no matches).')
-  else notes.push('No Valve match data (Leetify).')
-
   // ---- shared account-age context signal ------------------------------------
   if (agePts > 0) {
-    if (faceitAllowed || valveAllowed) {
+    if (faceitAllowed) {
       components.accountAge = agePts
-      const platforms = [faceitAllowed ? 'FACEIT' : '', valveAllowed ? 'Valve' : ''].filter(Boolean).join(' and ')
       signals.push({
         type: 'young_account',
         source: 'account',
         label: account.ageSource === 'steam' ? 'Young Steam account' : 'Young FACEIT account',
         points: agePts,
-        explanation: `${account.ageSource === 'steam' ? 'Steam account created' : 'FACEIT account activated'} ~${fmt(account.ageMonths!, 1)} months ago, combined with ${platforms} performance anomalies.`
+        explanation: `${account.ageSource === 'steam' ? 'Steam account created' : 'FACEIT account activated'} ~${fmt(account.ageMonths!, 1)} months ago, combined with FACEIT performance anomalies.`
       })
-    } else if (faceitScore !== undefined || valveScore !== undefined) {
+    } else if (faceitScore !== undefined) {
       notes.push(`Young account (${fmt(account.ageMonths!, 1)} months) ignored: no performance anomaly to combine with.`)
     }
   }
 
-  const score = Math.max(0, Math.min(100, Math.round(Math.max(faceitScore ?? 0, valveScore ?? 0))))
+  const score = Math.max(0, Math.min(100, Math.round(faceitScore ?? 0)))
   signals.sort((a, b) => b.points - a.points)
-  if (faceitScore === undefined && valveScore === undefined) notes.push('No platform statistics: score is not meaningful.')
+  if (faceitScore === undefined) notes.push('No platform statistics: score is not meaningful.')
 
-  return { score, level: scoreToLevel(score), signals, faceitScore, valveScore, components, notes }
+  return { score, level: scoreToLevel(score), signals, faceitScore, components, notes }
 }

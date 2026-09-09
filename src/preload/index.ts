@@ -4,9 +4,7 @@ import type {
   ApiKeyStatus,
   AppSettings,
   BanEvent,
-  ImportResult,
   LobbySession,
-  MatchSummary,
   ParsedLobby,
   PlayerHistory,
   ScoutPlayer,
@@ -25,8 +23,6 @@ export interface LobbyDetectedEvent {
   playerCount: number
 }
 
-export type { ImportResult }
-
 export interface RecheckResult {
   checked: number
   changed: BanEvent[]
@@ -36,7 +32,7 @@ export interface RecheckResult {
 export interface AppInfo {
   version: string
   userDataPath: string
-  counts: { players: number; watched: number; sessions: number; matches: number; cache: number }
+  counts: { players: number; watched: number; sessions: number; cache: number }
   session?: LobbySession
 }
 
@@ -70,9 +66,6 @@ const api = {
   clearHistory: (): Promise<boolean> => ipcRenderer.invoke(IPC.HISTORY_CLEAR),
   openExternal: (url: string): Promise<boolean> => ipcRenderer.invoke(IPC.OPEN_EXTERNAL, url),
   appInfo: (): Promise<AppInfo> => ipcRenderer.invoke(IPC.APP_INFO),
-  importLastMatches: (limit?: number): Promise<ImportResult> => ipcRenderer.invoke(IPC.MATCHES_IMPORT, limit),
-  listMatches: (): Promise<MatchSummary[]> => ipcRenderer.invoke(IPC.MATCHES_LIST),
-  openMatch: (matchId: string): Promise<LobbySession | undefined> => ipcRenderer.invoke(IPC.MATCH_OPEN, matchId),
 
   onLobbyDetected: (cb: (e: LobbyDetectedEvent) => void) => on<LobbyDetectedEvent>(IPC.EVT_LOBBY_DETECTED, cb),
   onPlayerUpdated: (cb: (p: ScoutPlayer) => void) => on<ScoutPlayer>(IPC.EVT_PLAYER_UPDATED, cb),
