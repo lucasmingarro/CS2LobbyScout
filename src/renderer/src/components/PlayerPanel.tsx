@@ -50,8 +50,7 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
   const s = p.steam
   const f = p.faceit
   const bans = (s?.vacBans ?? 0) + (s?.gameBans ?? 0)
-  const fmtRating = (x: number | undefined): string => (x === undefined ? '–' : `${x >= 0 ? '+' : ''}${x.toFixed(2)}`)
-  const srcTag: Record<string, string> = { faceit: 'FACEIT', valve: 'Valve', account: 'Account' }
+  const srcTag: Record<string, string> = { faceit: 'FACEIT', account: 'Account' }
 
   return (
     <div className="panel-inner">
@@ -141,47 +140,6 @@ export function PlayerPanel({ player: p, showScore, showSignals, onClose, onWatc
           )}
         </dl>
       </Section>
-
-      {p.matchStats && (
-        <Section title="This match">
-          <dl className="kv">
-            <dt>K / A / D</dt>
-            <dd>
-              {p.matchStats.kills} / {p.matchStats.assists} / {p.matchStats.deaths}
-            </dd>
-            <dt>ADR · HS · Score</dt>
-            <dd>
-              {fmtInt(p.matchStats.adr)} · {fmtPct(p.matchStats.headshotPercentage)} · {p.matchStats.score}
-            </dd>
-            {p.matchStats.premierRating !== undefined && p.matchStats.premierRating > 0 && (
-              <>
-                <dt>Premier rating</dt>
-                <dd className="premier">
-                  {fmtInt(p.matchStats.premierRatingBefore)} → {fmtInt(p.matchStats.premierRating)}
-                </dd>
-              </>
-            )}
-            {p.matchStats.premierWins !== undefined && (
-              <>
-                <dt>Premier wins</dt>
-                <dd>{fmtInt(p.matchStats.premierWins)}</dd>
-              </>
-            )}
-            <dt>Leetify rating</dt>
-            <dd>{fmtRating(p.matchStats.leetifyRating)}</dd>
-            <dt>Pre-aim · reaction</dt>
-            <dd>
-              {p.matchStats.preaim !== undefined ? `${p.matchStats.preaim.toFixed(1)}°` : '–'} · {fmtInt(p.matchStats.reactionTimeMs)} ms
-            </dd>
-            {p.matchStats.party !== undefined && (
-              <>
-                <dt>Party</dt>
-                <dd>{p.matchStats.party}</dd>
-              </>
-            )}
-          </dl>
-        </Section>
-      )}
 
       <Section title={`FACEIT · ${sourceLabel[p.sources.faceit]}`}>
         {f ? (

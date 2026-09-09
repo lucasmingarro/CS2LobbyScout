@@ -6,7 +6,7 @@ import type { AppSettings, Team } from '@shared/types'
 import type { AppContext } from './context'
 import { errorFields, logger, setDebug } from './logger'
 
-const ALLOWED_HOSTS = ['steamcommunity.com', 'www.faceit.com', 'faceit.com', 'developers.faceit.com', 'leetify.com', 'www.leetify.com']
+const ALLOWED_HOSTS = ['steamcommunity.com', 'www.faceit.com', 'faceit.com', 'developers.faceit.com']
 
 export function registerIpc(ctx: AppContext): void {
   const { repos, scout, banRecheck, config, clipboardWatcher } = ctx
@@ -95,10 +95,6 @@ export function registerIpc(ctx: AppContext): void {
       return false
     }
   })
-
-  ipcMain.handle(IPC.MATCHES_IMPORT, (_e, limit?: number) => scout.importLastMatches(typeof limit === 'number' ? limit : 10))
-  ipcMain.handle(IPC.MATCHES_LIST, () => scout.listMatches())
-  ipcMain.handle(IPC.MATCH_OPEN, (_e, matchId: string) => scout.openMatch(String(matchId)))
 
   ipcMain.handle(IPC.APP_INFO, () => ({
     version: ctx.version,

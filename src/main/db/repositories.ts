@@ -2,15 +2,10 @@ import type {
   BanEvent,
   FaceitInfo,
   HistoryInfo,
-  ImportedMatch,
-  ImportedMatchPlayer,
-  MatchMode,
-  MatchSummary,
   PlayerHistory,
   ScoutResult,
   SteamInfo,
   Team,
-  ValveInfo,
   WatchedPlayerRow
 } from '@shared/types'
 import type { Db } from './database'
@@ -234,26 +229,8 @@ export class Repositories {
         c.performanceJump,
         JSON.stringify({ signals: r.signals, components: c }),
         r.faceitScore ?? null,
-        r.valveScore ?? null,
-        nowIso()
-      )
-  }
-
-  insertValveSnapshot(steamId: string, v: ValveInfo): void {
-    this.db
-      .prepare(
-        `INSERT INTO valve_snapshots (steam_id, premier_rating, leetify_rating, total_matches, win_rate, preaim, reaction_time_ms, headshot_accuracy, captured_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      .run(
-        steamId,
-        v.premierRating ?? null,
-        v.leetifyRating ?? null,
-        v.totalMatches ?? null,
-        v.winRate ?? null,
-        v.preaim ?? null,
-        v.reactionTimeMs ?? null,
-        v.headshotAccuracy ?? null,
+        // valve_score: the column stays in the frozen schema; always NULL since engine v3.
+        null,
         nowIso()
       )
   }
@@ -432,229 +409,6 @@ export class Repositories {
     this.db.prepare(`UPDATE ban_events SET acknowledged = 1 WHERE id = ?`).run(id)
   }
 
-  // ---- imported matches --------------------------------------------------------
-
-  hasMatch(matchId: string): boolean {
-    return !!this.db.prepare(`SELECT 1 FROM matches WHERE match_id = ?`).get(matchId)
-  }
-
-  /** Stores a match and its players; also registers each player as seen. Returns false if it already existed. */
-  insertMatch(m: ImportedMatch, countEncounters: boolean): boolean {
-    if (this.hasMatch(m.matchId)) return false
-    const run = this.db.transaction(() => {
-      this.db
-        .prepare(
-          `INSERT INTO matches (match_id, mode, map, played_at, duration_seconds, wait_seconds, my_score, their_score, result, imported_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-        )
-        .run(m.matchId, m.mode, m.map ?? null, m.playedAt, m.durationSeconds ?? null, m.waitSeconds ?? null, m.myScore ?? null, m.theirScore ?? null, m.result ?? null, nowIso())
-      this.db.prepare(`UPDATE matches SET server_name = ?, has_banned_player = ? WHERE match_id = ?`).run(m.serverName ?? null, m.hasBannedPlayer ? 1 : 0, m.matchId)
-      const ins = this.db.prepare(
-        `INSERT OR REPLACE INTO match_players (match_id, steam_id, name, team, kills, assists, deaths, mvps, headshot_percentage, score, ping,
-           adr, premier_rating, premier_rating_before, premier_wins, leetify_rating, preaim, reaction_time_ms, headshot_accuracy, party)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-      )
-      for (const p of m.players) {
-        const st = p.stats
-        ins.run(
-          m.matchId, p.steamId, p.name, p.team, st.kills, st.assists, st.deaths, st.mvps, st.headshotPercentage ?? null, st.score, st.ping ?? null,
-          st.adr ?? null, st.premierRating ?? null, st.premierRatingBefore ?? null, st.premierWins ?? null, st.leetifyRating ?? null,
-          st.preaim ?? null, st.reactionTimeMs ?? null, st.headshotAccuracy ?? null, st.party ?? null
-        )
-        this.upsertPlayerSeen(p.steamId, p.name, p.avatarUrl, countEncounters)
-      }
-      if (countEncounters) {
-        const sessionId = this.createSession('steam_history', m.matchId)
-        for (const p of m.players) {
-          this.db
-            .prepare(`INSERT INTO encounters (match_session_id, steam_id, team, encountered_at) VALUES (?, ?, ?, ?) ON CONFLICT(match_session_id, steam_id) DO UPDATE SET team = excluded.team`)
-            .run(sessionId, p.steamId, p.team, m.playedAt)
-        }
-      }
-    })
-    run()
-    return true
-  }
-
-  listMatches(limit = 100): MatchSummary[] {
-    const rows = this.db
-      .prepare(
-        `SELECT m.*, (SELECT COUNT(*) FROM match_players mp WHERE mp.match_id = m.match_id) AS player_count
-         FROM matches m ORDER BY played_at DESC LIMIT ?`
-      )
-      .all(limit) as Array<{
-      match_id: string
-      mode: MatchMode
-      map: string | null
-      played_at: string
-      duration_seconds: number | null
-      my_score: number | null
-      their_score: number | null
-      result: string | null
-      player_count: number
-    }>
-    return rows.map((r) => ({
-      matchId: r.match_id,
-      mode: r.mode,
-      map: r.map ?? undefined,
-      playedAt: r.played_at,
-      durationSeconds: r.duration_seconds ?? undefined,
-      myScore: r.my_score ?? undefined,
-      theirScore: r.their_score ?? undefined,
-      result: (r.result as MatchSummary['result']) ?? undefined,
-      playerCount: r.player_count
-    }))
-  }
-
-  getMatch(matchId: string): ImportedMatch | undefined {
-    const summary = this.listMatches(1000).find((m) => m.matchId === matchId)
-    if (!summary) return undefined
-    const rows = this.db
-      .prepare(`SELECT mp.*, p.avatar_url FROM match_players mp LEFT JOIN players p ON p.steam_id = mp.steam_id WHERE mp.match_id = ? ORDER BY mp.team, mp.score DESC`)
-      .all(matchId) as Array<{
-      steam_id: string
-      name: string
-      team: Team
-      kills: number
-      assists: number
-      deaths: number
-      mvps: number
-      headshot_percentage: number | null
-      score: number
-      ping: number | null
-      adr: number | null
-      premier_rating: number | null
-      premier_rating_before: number | null
-      premier_wins: number | null
-      leetify_rating: number | null
-      preaim: number | null
-      reaction_time_ms: number | null
-      headshot_accuracy: number | null
-      party: number | null
-      avatar_url: string | null
-    }>
-    const players: ImportedMatchPlayer[] = rows.map((r) => ({
-      steamId: r.steam_id,
-      name: r.name,
-      avatarUrl: r.avatar_url ?? undefined,
-      team: r.team,
-      stats: {
-        kills: r.kills,
-        assists: r.assists,
-        deaths: r.deaths,
-        mvps: r.mvps,
-        headshotPercentage: r.headshot_percentage ?? undefined,
-        score: r.score,
-        ping: r.ping ?? undefined,
-        adr: r.adr ?? undefined,
-        premierRating: r.premier_rating ?? undefined,
-        premierRatingBefore: r.premier_rating_before ?? undefined,
-        premierWins: r.premier_wins ?? undefined,
-        leetifyRating: r.leetify_rating ?? undefined,
-        preaim: r.preaim ?? undefined,
-        reactionTimeMs: r.reaction_time_ms ?? undefined,
-        headshotAccuracy: r.headshot_accuracy ?? undefined,
-        party: r.party ?? undefined
-      }
-    }))
-    const { playerCount: _pc, ...rest } = summary
-    void _pc
-    return { ...rest, players }
-  }
-
-  /**
-   * Valve statistics aggregated from every imported match a player appears in.
-   * This is what makes the Valve line work for players who do not use Leetify:
-   * each imported match carries the full scoreboard of all ten players.
-   */
-  valveAggregates(steamIds: string[]): Map<string, ValveInfo> {
-    const out = new Map<string, ValveInfo>()
-    if (steamIds.length === 0) return out
-    const placeholders = steamIds.map(() => '?').join(',')
-    const rows = this.db
-      .prepare(
-        `SELECT mp.steam_id,
-                COUNT(*)                                            AS matches,
-                SUM(mp.kills)                                       AS kills,
-                SUM(mp.deaths)                                      AS deaths,
-                AVG(mp.adr)                                         AS adr,
-                AVG(mp.headshot_percentage)                         AS hs,
-                AVG(mp.headshot_accuracy)                           AS hs_accuracy,
-                AVG(mp.preaim)                                      AS preaim,
-                AVG(mp.reaction_time_ms)                            AS reaction,
-                AVG(mp.leetify_rating)                              AS leetify_rating,
-                SUM(CASE WHEN m.result IS NOT NULL AND (
-                      (mp.team = 'mine' AND m.result = 'win') OR (mp.team = 'enemy' AND m.result = 'loss')
-                    ) THEN 1 ELSE 0 END)                            AS wins,
-                SUM(CASE WHEN m.result IN ('win','loss') THEN 1 ELSE 0 END) AS decided
-         FROM match_players mp JOIN matches m ON m.match_id = mp.match_id
-         WHERE mp.steam_id IN (${placeholders})
-         GROUP BY mp.steam_id`
-      )
-      .all(...steamIds) as Array<{
-      steam_id: string
-      matches: number
-      kills: number
-      deaths: number
-      adr: number | null
-      hs: number | null
-      hs_accuracy: number | null
-      preaim: number | null
-      reaction: number | null
-      leetify_rating: number | null
-      wins: number
-      decided: number
-    }>
-
-    const ratingRows = this.db
-      .prepare(
-        `SELECT mp.steam_id, mp.premier_rating, mp.premier_wins, m.played_at
-         FROM match_players mp JOIN matches m ON m.match_id = mp.match_id
-         WHERE mp.steam_id IN (${placeholders}) AND mp.premier_rating > 0
-         ORDER BY m.played_at ASC`
-      )
-      .all(...steamIds) as Array<{ steam_id: string; premier_rating: number; premier_wins: number | null; played_at: string }>
-    const ratings = new Map<string, { first: number; last: number; wins?: number }>()
-    for (const r of ratingRows) {
-      const cur = ratings.get(r.steam_id)
-      if (!cur) ratings.set(r.steam_id, { first: r.premier_rating, last: r.premier_rating, wins: r.premier_wins ?? undefined })
-      else {
-        cur.last = r.premier_rating
-        if (r.premier_wins !== null) cur.wins = r.premier_wins
-      }
-    }
-
-    const round = (v: number | null, digits = 2): number | undefined =>
-      v === null || !Number.isFinite(v) ? undefined : Math.round(v * 10 ** digits) / 10 ** digits
-    for (const r of rows) {
-      const rating = ratings.get(r.steam_id)
-      out.set(r.steam_id, {
-        source: 'matches',
-        sampleMatches: r.matches,
-        premierRating: rating?.last,
-        premierRatingThen: rating && rating.first !== rating.last ? rating.first : undefined,
-        premierWins: rating?.wins,
-        kd: r.deaths > 0 ? round(r.kills / r.deaths) : undefined,
-        adr: round(r.adr, 1),
-        headshotPercentage: round(r.hs, 1),
-        headshotAccuracy: round(r.hs_accuracy, 1),
-        preaim: round(r.preaim, 1),
-        reactionTimeMs: round(r.reaction, 0),
-        leetifyRating: round(r.leetify_rating, 2),
-        winRate: r.decided > 0 ? round((r.wins / r.decided) * 100, 1) : undefined,
-        totalMatches: r.matches
-      })
-    }
-    return out
-  }
-
-  /** Most recent imported matches (newest first) — used to back-fill live lobbies. */
-  recentMatches(limit = 5): ImportedMatch[] {
-    return this.listMatches(limit)
-      .map((m) => this.getMatch(m.matchId))
-      .filter((m): m is ImportedMatch => !!m)
-  }
-
   // ---- maintenance -------------------------------------------------------------
 
   /** Deletes all history (players, snapshots, sessions, bans). Keeps the API cache. */
@@ -674,13 +428,12 @@ export class Repositories {
     run()
   }
 
-  counts(): { players: number; watched: number; sessions: number; matches: number; cache: number } {
+  counts(): { players: number; watched: number; sessions: number; cache: number } {
     const one = (sql: string): number => (this.db.prepare(sql).get() as { n: number }).n
     return {
       players: one(`SELECT COUNT(*) n FROM players`),
       watched: one(`SELECT COUNT(*) n FROM players WHERE watched = 1`),
       sessions: one(`SELECT COUNT(*) n FROM match_sessions`),
-      matches: one(`SELECT COUNT(*) n FROM matches`),
       cache: one(`SELECT COUNT(*) n FROM api_cache`)
     }
   }

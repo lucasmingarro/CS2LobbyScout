@@ -1,4 +1,4 @@
-import type { FaceitMatchContext, IdentitySource, ImportedMatch, ImportResult, LobbySession, MatchSummary, ScoutPlayer, Team, ValveInfo } from '@shared/types'
+import type { FaceitMatchContext, IdentitySource, LobbySession, ScoutPlayer, Team } from '@shared/types'
 import { parseStatus } from '@shared/lobby-parser'
 import { computeScore, ENGINE_VERSION } from '@shared/scout-engine'
 import { IPC } from '@shared/ipc'
@@ -6,47 +6,17 @@ import type { Repositories } from '../db/repositories'
 import type { ConfigStore } from '../config'
 import type { SteamClient } from './steam-client'
 import { toFaceitLobby, type FaceitClient } from './faceit-client'
-import { toImportedMatch, type LeetifyClient } from './leetify-client'
 import { errorFields, logger } from '../logger'
 
 export type Emitter = (channel: string, payload: unknown) => void
 
-/**
- * Combines the public Leetify profile with the aggregate built from imported
- * matches. Profile values win where they exist (they cover the player's whole
- * history); match aggregates fill the rest and always provide the Premier
- * rating, which the profile hides for non-Leetify users.
- */
-export function mergeValve(profile: ValveInfo | undefined, local: ValveInfo | undefined): ValveInfo | undefined {
-  const hasProfile = !!profile && (profile.premierRating !== undefined || profile.leetifyRating !== undefined || profile.preaim !== undefined)
-  if (!hasProfile) return local
-  if (!local) return { ...profile!, source: 'leetify_profile' }
-  const pick = <K extends keyof ValveInfo>(key: K): ValveInfo[K] => (profile![key] !== undefined ? profile![key] : local[key])
-  return {
-    ...local,
-    ...profile,
-    source: 'mixed',
-    sampleMatches: local.sampleMatches,
-    premierRating: pick('premierRating'),
-    premierRatingThen: local.premierRatingThen,
-    premierWins: local.premierWins ?? profile!.premierWins,
-    kd: pick('kd'),
-    adr: pick('adr'),
-    headshotPercentage: pick('headshotPercentage'),
-    preaim: pick('preaim'),
-    reactionTimeMs: pick('reactionTimeMs'),
-    headshotAccuracy: pick('headshotAccuracy')
-  }
-}
-
 interface ActiveSession {
   id?: number
   createdAt: string
-  source: 'paste' | 'clipboard' | 'steam_history' | 'faceit_match'
+  source: 'paste' | 'clipboard' | 'faceit_match'
   rawHash: string
   officialServer: boolean
   map?: string
-  match?: MatchSummary
   faceitMatch?: FaceitMatchContext
   saveHistory: boolean
   players: Map<string, ScoutPlayer>
@@ -70,7 +40,6 @@ export class ScoutService {
     private repos: Repositories,
     private steam: SteamClient,
     private faceit: FaceitClient,
-    private leetify: LeetifyClient,
     private config: ConfigStore,
     private emit: Emitter
   ) {}
@@ -90,7 +59,6 @@ export class ScoutService {
       source: s.source,
       officialServer: s.officialServer,
       map: s.map,
-      match: s.match,
       faceitMatch: s.faceitMatch,
       players: [...s.players.values()]
     }
@@ -156,7 +124,6 @@ export class ScoutService {
         sources: {
           steam: !this.steam.hasKey() ? 'no_key' : steamId ? 'pending' : 'no_id',
           faceit: this.faceit.hasKey() ? 'pending' : 'no_key',
-          valve: steamId ? 'pending' : 'no_id',
           history: 'ok'
         },
         watched: false
@@ -229,7 +196,6 @@ export class ScoutService {
         sources: {
           steam: this.steam.hasKey() ? 'pending' : 'no_key',
           faceit: 'pending',
-          valve: 'pending',
           history: 'ok'
         },
         watched: false
@@ -273,7 +239,7 @@ export class ScoutService {
   }
 
   private rescore(player: ScoutPlayer): void {
-    player.scout = computeScore({ steam: player.steam, faceit: player.faceit, valve: player.valve })
+    player.scout = computeScore({ steam: player.steam, faceit: player.faceit })
   }
 
   private async enrichAll(session: ActiveSession, keys: string[], bypassCache: boolean): Promise<void> {
@@ -281,44 +247,7 @@ export class ScoutService {
     // FACEIT first: for name-only players it is also what gives us a Steam64.
     await Promise.all(targets.map((p) => this.enrichFaceit(session, p, bypassCache)))
     const identified = targets.filter((p) => p.steamId)
-    await Promise.all([this.enrichSteam(session, identified, bypassCache), ...identified.map((p) => this.enrichValve(session, p, bypassCache))])
-  }
-
-  /**
-   * Valve matchmaking statistics. Two sources, merged:
-   *  - the player's public Leetify profile, which only exists for Leetify users;
-   *  - the matches this app imported, which carry the full scoreboard and the
-   *    Premier rating of all ten players whether or not they use Leetify.
-   */
-  private async enrichValve(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
-    if (!player.steamId) {
-      player.sources.valve = 'no_id'
-      return
-    }
-    player.sources.valve = 'pending'
-    const local = this.repos.valveAggregates([player.steamId]).get(player.steamId)
-    try {
-      const r = await this.leetify.profile(player.steamId, { bypassCache })
-      const profile = r.status === 'ok' ? r.info : undefined
-      const merged = mergeValve(profile, local)
-      if (merged) {
-        player.valve = merged
-        player.sources.valve = 'ok'
-      } else {
-        player.sources.valve = r.status === 'ok' ? 'not_found' : r.status
-      }
-    } catch (err) {
-      if (local) {
-        player.valve = local
-        player.sources.valve = 'ok'
-      } else player.sources.valve = 'unavailable'
-      logger.warn('valve.lookup_failed', { steamId: player.steamId, ...errorFields(err) })
-    }
-    this.rescore(player)
-    if (player.sources.valve === 'ok' && player.steamId && player.valve && (player.valve.premierRating !== undefined || player.valve.leetifyRating !== undefined)) {
-      this.repos.insertValveSnapshot(player.steamId, player.valve)
-    }
-    this.pushUpdate(session, player)
+    await this.enrichSteam(session, identified, bypassCache)
   }
 
   private async enrichFaceit(session: ActiveSession, player: ScoutPlayer, bypassCache: boolean): Promise<void> {
@@ -341,7 +270,6 @@ export class ScoutService {
           player.steamId = r.steamId
           player.identity = 'faceit_name'
           player.sources.steam = this.steam.hasKey() ? 'pending' : 'no_key'
-          player.sources.valve = 'pending'
           this.registerIdentified(session, player)
           logger.info('identity.faceit_name', { name: player.name, steamId: r.steamId })
         }
@@ -400,7 +328,6 @@ export class ScoutService {
     if (!session || !player) return undefined
     player.sources.steam = !this.steam.hasKey() ? 'no_key' : player.steamId ? 'pending' : 'no_id'
     player.sources.faceit = this.faceit.hasKey() ? 'pending' : 'no_key'
-    player.sources.valve = player.steamId ? 'pending' : 'no_id'
     this.pushUpdate(session, player)
     await this.enrichAll(session, [key], true)
     if (player.steamId) player.history = this.repos.history(player.steamId)
@@ -435,173 +362,5 @@ export class ScoutService {
     }
     logger.info(watched ? 'player.watch' : 'player.unwatch', { steamId })
     return watched
-  }
-
-  // ---- Leetify match import ------------------------------------------------------
-
-  /**
-   * Pulls the newest Valve matches of the configured Steam account from Leetify,
-   * stores them, and back-fills the live lobby (names -> exact Steam64 + team).
-   */
-  async importLastMatches(limit = 10): Promise<ImportResult> {
-    const settings = this.config.getSettings()
-    const mySteamId = settings.mySteamId
-    const result: ImportResult = { imported: 0, skipped: 0, pages: 0, backfilled: 0 }
-    if (!mySteamId) return { ...result, error: 'Set your Steam64 ID in Settings first.' }
-
-    const all = await this.leetify.profileMatches(mySteamId, { bypassCache: true })
-    if (all.length === 0) {
-      return { ...result, error: 'Leetify has no Valve matches for your account yet. Make sure you signed in at leetify.com with Steam and added the match authentication code.' }
-    }
-    const recent = all.slice(0, Math.max(1, Math.min(10, limit)))
-    result.pages = 1
-
-    const imported: ImportedMatch[] = []
-    for (const rm of recent) {
-      if (this.repos.hasMatch(rm.id)) {
-        result.skipped++
-        continue
-      }
-      const raw = await this.leetify.match(rm.id)
-      if (!raw) {
-        result.error = 'Leetify match details are not reachable right now.'
-        continue
-      }
-      const match = toImportedMatch(raw, rm.id, mySteamId, {
-        finished_at: rm.finished_at,
-        map_name: rm.map_name,
-        data_source: rm.data_source,
-        team_scores: rm.team_scores
-      })
-      if (!match) continue
-      if (this.repos.insertMatch(match, settings.saveEncounterHistory)) {
-        result.imported++
-        imported.push(match)
-      } else result.skipped++
-    }
-    logger.info('leetify.import', { imported: result.imported, skipped: result.skipped })
-
-    // Back-fill the live lobby from the newest match that actually looks like it (map + names).
-    const candidates = recent.map((rm) => imported.find((m) => m.matchId === rm.id) ?? this.repos.getMatch(rm.id)).filter((m): m is ImportedMatch => !!m)
-    for (const m of candidates) {
-      const filled = await this.backfillFromMatch(m)
-      if (filled > 0) {
-        result.backfilled = filled
-        break
-      }
-    }
-    await this.refreshValveFromMatches()
-    if (this.session && this.session.source !== 'steam_history' && result.backfilled === 0 && !result.error) {
-      result.error = 'None of the imported matches corresponds to the current lobby yet. Leetify usually needs a few minutes after a match ends.'
-    }
-    return result
-  }
-
-  /** Recomputes the Valve line of the current lobby from the imported matches. */
-  private async refreshValveFromMatches(): Promise<void> {
-    const session = this.session
-    if (!session) return
-    const players = [...session.players.values()].filter((p) => p.steamId)
-    if (players.length === 0) return
-    const aggregates = this.repos.valveAggregates(players.map((p) => p.steamId!))
-    for (const player of players) {
-      const local = aggregates.get(player.steamId!)
-      if (!local) continue
-      const profile = player.valve?.source === 'matches' ? undefined : player.valve
-      player.valve = mergeValve(profile, local)
-      player.sources.valve = 'ok'
-      this.rescore(player)
-      if (player.valve) this.repos.insertValveSnapshot(player.steamId!, player.valve)
-      this.pushUpdate(session, player)
-    }
-  }
-
-  /**
-   * Match live name-only players against an imported match and enrich them.
-   * Requires the same map (when known) and at least three overlapping names so
-   * a stale match never gets glued onto an unrelated lobby.
-   */
-  private async backfillFromMatch(match: ImportedMatch): Promise<number> {
-    const session = this.session
-    if (!session || session.source === 'steam_history') return 0
-    if (session.map && match.map && session.map.toLowerCase() !== match.map.toLowerCase()) return 0
-    const byName = new Map(match.players.map((p) => [p.name.trim().toLowerCase(), p]))
-    const overlap = [...session.players.values()].filter((p) => byName.has(p.name.trim().toLowerCase())).length
-    if (overlap < Math.min(3, match.players.length)) return 0
-    const filled: ScoutPlayer[] = []
-    for (const player of session.players.values()) {
-      const mp = byName.get(player.name.trim().toLowerCase())
-      if (!mp) continue
-      const changed = player.steamId !== mp.steamId
-      if (player.identity === 'status' && !changed) continue
-      player.steamId = mp.steamId
-      player.identity = mp.steamId === this.config.getSettings().mySteamId ? 'self' : 'leetify_match'
-      player.team = mp.team !== 'unknown' ? mp.team : player.team
-      player.matchStats = mp.stats
-      if (changed) {
-        player.faceit = undefined
-        player.steam = undefined
-        player.valve = undefined
-        player.sources.faceit = this.faceit.hasKey() ? 'pending' : 'no_key'
-        player.sources.steam = this.steam.hasKey() ? 'pending' : 'no_key'
-        player.sources.valve = 'pending'
-        this.registerIdentified(session, player)
-        filled.push(player)
-      }
-      this.pushUpdate(session, player)
-    }
-    if (filled.length) {
-      logger.info('lobby.backfill', { players: filled.length, matchId: match.matchId })
-      await this.enrichAll(session, filled.map((p) => p.key), false)
-    }
-    return filled.length
-  }
-
-  listMatches(): MatchSummary[] {
-    return this.repos.listMatches(100)
-  }
-
-  /** Shows a stored match as a lobby session (exact teams and per-match stats). */
-  openMatch(matchId: string): LobbySession | undefined {
-    const match = this.repos.getMatch(matchId)
-    if (!match) return undefined
-    const mySteamId = this.config.getSettings().mySteamId
-    const players = new Map<string, ScoutPlayer>()
-    for (const mp of match.players) {
-      players.set(mp.steamId, {
-        key: mp.steamId,
-        steamId: mp.steamId,
-        identity: mp.steamId === mySteamId ? 'self' : 'leetify_match',
-        name: mp.name,
-        avatarUrl: mp.avatarUrl,
-        team: mp.team,
-        isLocal: mp.steamId === mySteamId,
-        matchStats: mp.stats,
-        scout: computeScore({}),
-        history: this.repos.history(mp.steamId),
-        sources: {
-          steam: this.steam.hasKey() ? 'pending' : 'no_key',
-          faceit: this.faceit.hasKey() ? 'pending' : 'no_key',
-          valve: 'pending',
-          history: 'ok'
-        },
-        watched: this.repos.isWatched(mp.steamId)
-      })
-    }
-    const { players: _p, ...summary } = match
-    const session: ActiveSession = {
-      createdAt: new Date().toISOString(),
-      source: 'steam_history',
-      rawHash: `match:${matchId}`,
-      officialServer: true,
-      map: match.map,
-      match: { ...summary, playerCount: _p.length },
-      saveHistory: false,
-      players
-    }
-    this.session = session
-    const snapshot = this.toLobbySession(session)
-    void this.enrichAll(session, [...players.keys()], false)
-    return snapshot
   }
 }

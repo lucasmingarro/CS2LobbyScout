@@ -13,7 +13,7 @@ export type Team = 'unknown' | 'mine' | 'enemy'
  *  - self:         matched the configured local Steam ID by persona name.
  *  - none:         name only, nothing could be resolved.
  */
-export type IdentitySource = 'status' | 'faceit_name' | 'faceit_match' | 'leetify_match' | 'self' | 'none'
+export type IdentitySource = 'status' | 'faceit_name' | 'faceit_match' | 'self' | 'none'
 
 /** A player as extracted from raw CS2 `status` output. */
 export interface LobbyPlayer {
@@ -57,17 +57,15 @@ export interface ScoutSignal {
   source: SignalSource
 }
 
-export type SignalSource = 'faceit' | 'valve' | 'account'
+export type SignalSource = 'faceit' | 'account'
 
 export interface ScoutResult {
-  /** Overall score: the higher of the two platform sub-scores. */
+  /** Overall score: the FACEIT sub-score, clamped 0-100. */
   score: number
   level: ScoutLevel
   signals: ScoutSignal[]
   /** FACEIT-based sub-score (0-100), undefined when there is no FACEIT data. */
   faceitScore?: number
-  /** Valve-based sub-score (0-100), undefined when there is no Valve/Leetify data. */
-  valveScore?: number
   /** Per-component breakdown, mirrors the scout_scores table. */
   components: {
     kd: number
@@ -77,13 +75,6 @@ export interface ScoutResult {
     matchCount: number
     winRate: number
     performanceJump: number
-    /** Valve-side components. */
-    valveRating: number
-    valvePreaim: number
-    valveReaction: number
-    valveHsAccuracy: number
-    valveRatingMismatch: number
-    valveKd: number
   }
   /** Human readable notes about data that was missing / ignored. */
   notes: string[]
@@ -136,65 +127,7 @@ export type SourceStatus = 'pending' | 'ok' | 'not_found' | 'unavailable' | 'no_
 export interface SourceStatuses {
   steam: SourceStatus
   faceit: SourceStatus
-  /** Valve-side statistics (Premier rating, aim metrics) via Leetify. */
-  valve: SourceStatus
   history: SourceStatus
-}
-
-/**
- * Valve matchmaking statistics for a player, sourced from Leetify's public API.
- * Leetify parses the demos of every Valve match one of its users plays, so most
- * active Premier players have data even without a Leetify account.
- */
-export interface ValveInfo {
-  /**
-   * Where these numbers come from:
-   *  - leetify_profile: the player has a public Leetify profile (lifetime stats).
-   *  - matches: aggregated from the Valve matches this app has imported, which
-   *    include every player of each match regardless of whether they use Leetify.
-   *  - mixed: profile data completed with match aggregates.
-   */
-  source?: 'leetify_profile' | 'matches' | 'mixed'
-  /** How many imported matches the aggregate is based on. */
-  sampleMatches?: number
-  /** Premier rating (CS Rating). */
-  premierRating?: number
-  /** Premier rating in the oldest imported match, to show a trend. */
-  premierRatingThen?: number
-  /** Wins counted by Valve for the Premier season. */
-  premierWins?: number
-  /** Averages over imported matches. */
-  kd?: number
-  adr?: number
-  headshotPercentage?: number
-  /** Competitive skill group (0-18) per map, keyed by map name (de_mirage, ...). */
-  competitiveRanks?: Record<string, number>
-  /** Leetify rating: average round-win-probability contribution in %, roughly -10..+10. */
-  leetifyRating?: number
-  totalMatches?: number
-  winRate?: number
-  firstMatchAt?: string
-  /** Aim metrics (Leetify definitions). */
-  preaim?: number
-  reactionTimeMs?: number
-  headshotAccuracy?: number
-  sprayAccuracy?: number
-  accuracyEnemySpotted?: number
-  /** Skill ratings 0-100 from Leetify. */
-  ratings?: { aim?: number; positioning?: number; utility?: number; clutch?: number; opening?: number }
-  /** Aggregates over the most recent Valve matches Leetify has. */
-  recent?: {
-    matches: number
-    wins: number
-    losses: number
-    ties: number
-    avgLeetifyRating?: number
-    /** Premier rating at the newest and oldest recent match. */
-    premierNow?: number
-    premierThen?: number
-  }
-  bans?: string[]
-  profileUrl?: string
 }
 
 export interface HistoryInfo {
@@ -217,96 +150,12 @@ export interface ScoutPlayer {
   ping?: number
   steam?: SteamInfo
   faceit?: FaceitInfo
-  valve?: ValveInfo
   scout: ScoutResult
   history: HistoryInfo
   sources: SourceStatuses
   watched: boolean
-  /** Per-match scoreboard numbers when the lobby comes from an imported Valve match. */
-  matchStats?: MatchPlayerStats
   /** FACEIT faction when the lobby comes from a FACEIT match (drives neutral grouping). */
   faction?: 'faction1' | 'faction2'
-}
-
-export interface MatchPlayerStats {
-  kills: number
-  assists: number
-  deaths: number
-  mvps: number
-  headshotPercentage?: number
-  score: number
-  ping?: number
-  adr?: number
-  /** Premier rating at the time of the match, when known (0 = unranked). */
-  premierRating?: number
-  /** Premier rating before this match. */
-  premierRatingBefore?: number
-  /** Premier wins counted by Valve at that time. */
-  premierWins?: number
-  /** Leetify rating for this match, in %. */
-  leetifyRating?: number
-  /** Per-match aim metrics. */
-  preaim?: number
-  reactionTimeMs?: number
-  headshotAccuracy?: number
-  /** Party index inside the lobby: players sharing a number queued together. */
-  party?: number
-}
-
-export type MatchMode = 'competitive' | 'premier' | 'wingman' | 'other'
-
-/** A match imported from the user's own Steam match history. */
-export interface ImportedMatch {
-  matchId: string
-  mode: MatchMode
-  map?: string
-  playedAt: string
-  durationSeconds?: number
-  waitSeconds?: number
-  /** Score of the team the local user was on, then the opponents. */
-  myScore?: number
-  theirScore?: number
-  result?: 'win' | 'loss' | 'tie' | 'unknown'
-  players: ImportedMatchPlayer[]
-  serverName?: string
-  hasBannedPlayer?: boolean
-}
-
-export interface ImportedMatchPlayer {
-  steamId: string
-  name: string
-  avatarUrl?: string
-  team: Team
-  stats: MatchPlayerStats
-}
-
-export interface MatchSummary {
-  matchId: string
-  mode: MatchMode
-  map?: string
-  playedAt: string
-  durationSeconds?: number
-  myScore?: number
-  theirScore?: number
-  result?: 'win' | 'loss' | 'tie' | 'unknown'
-  playerCount: number
-}
-
-export interface SteamLoginStatus {
-  loggedIn: boolean
-  /** Steam64 of the logged-in account when it can be determined from the profile redirect. */
-  steamId?: string
-  /** Set when the logged-in account differs from settings.mySteamId. */
-  mismatch?: boolean
-}
-
-export interface ImportResult {
-  imported: number
-  skipped: number
-  pages: number
-  error?: string
-  /** Names from the current live lobby that got a Steam64 from the import. */
-  backfilled: number
 }
 
 /** Context of a FACEIT match the lobby was loaded from. */
@@ -323,9 +172,8 @@ export interface FaceitMatchContext {
 export interface LobbySession {
   id: number
   createdAt: string
+  /** 'steam_history' only survives as a historical value in databases written by earlier versions; no code creates it anymore. */
   source: 'paste' | 'clipboard' | 'steam_history' | 'faceit_match'
-  /** Present when the session shows an imported match. */
-  match?: MatchSummary
   /** Present when the session was loaded from a FACEIT match room. */
   faceitMatch?: FaceitMatchContext
   officialServer: boolean

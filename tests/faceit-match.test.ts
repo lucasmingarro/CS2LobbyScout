@@ -7,7 +7,6 @@ import { MemoryCache } from '../src/main/services/cache'
 import { FaceitClient, toFaceitLobby } from '../src/main/services/faceit-client'
 import { ScoutService } from '../src/main/services/scout-service'
 import type { SteamClient } from '../src/main/services/steam-client'
-import type { LeetifyClient } from '../src/main/services/leetify-client'
 import type { ConfigStore } from '../src/main/config'
 import {
   eightPlayerMatch,
@@ -130,9 +129,8 @@ function makeService(fetchImpl: ReturnType<typeof vi.fn>, opts: { faceitKey?: st
   const rm = new RequestManager({ fetchImpl: fetchImpl as unknown as typeof fetch, retries: 0 })
   const faceit = new FaceitClient(rm, new MemoryCache(), () => opts.faceitKey)
   const steam = { hasKey: () => false } as unknown as SteamClient
-  const leetify = { profile: async () => ({ status: 'not_found' as const }) } as unknown as LeetifyClient
   const config = { getSettings: () => ({ ...DEFAULT_SETTINGS, mySteamId: opts.mySteamId ?? '' }) } as unknown as ConfigStore
-  const scout = new ScoutService(repos, steam, faceit, leetify, config, () => {})
+  const scout = new ScoutService(repos, steam, faceit, config, () => {})
   return { scout, repos, db }
 }
 

@@ -5,11 +5,10 @@ import { extractFaceitMatchId } from '@shared/faceit-room'
 import { LobbyScreen } from './screens/LobbyScreen'
 import { WatchedScreen } from './screens/WatchedScreen'
 import { SettingsScreen } from './screens/SettingsScreen'
-import { MatchesScreen } from './screens/MatchesScreen'
 import { PlayerPanel } from './components/PlayerPanel'
 import { Toasts, type Toast } from './components/Toasts'
 
-type Tab = 'lobby' | 'matches' | 'watched' | 'settings'
+type Tab = 'lobby' | 'watched' | 'settings'
 
 export default function App(): JSX.Element {
   const [tab, setTab] = useState<Tab>('lobby')
@@ -140,23 +139,6 @@ export default function App(): JSX.Element {
     if (p) setPlayers((prev) => new Map(prev).set(key, p))
   }
 
-  const [matchesRefresh, setMatchesRefresh] = useState(0)
-
-  const importMatches = async (): Promise<string | undefined> => {
-    const r = await window.scout.importLastMatches(10)
-    setMatchesRefresh((n) => n + 1)
-    if (r.error && r.imported === 0) return r.error
-    const parts = [`${r.imported} imported`, `${r.skipped} already known`]
-    if (r.backfilled) parts.push(`${r.backfilled} lobby player(s) identified`)
-    if (r.error) parts.push(r.error)
-    return parts.join(' · ')
-  }
-
-  const openMatch = async (matchId: string): Promise<void> => {
-    const s = await window.scout.openMatch(matchId)
-    if (s) applySession(s)
-  }
-
   const changeSettings = async (patch: Partial<AppSettings>): Promise<void> => {
     const next = await window.scout.setSettings(patch)
     setSettings(next)
@@ -173,17 +155,13 @@ export default function App(): JSX.Element {
           CS2 LOBBY SCOUT
           {session && (
             <small>
-              {session.match ? `${session.match.mode} · ` : ''}{session.players.length} players{session.map ? ` · ${session.map}` : ''} ·{' '}
-              {new Date(session.match?.playedAt ?? session.createdAt).toLocaleString()}
+              {session.players.length} players{session.map ? ` · ${session.map}` : ''} · {new Date(session.createdAt).toLocaleString()}
             </small>
           )}
         </div>
         <nav className="tabs">
           <button className={`tab ${tab === 'lobby' ? 'active' : ''}`} onClick={() => setTab('lobby')}>
             Lobby
-          </button>
-          <button className={`tab ${tab === 'matches' ? 'active' : ''}`} onClick={() => setTab('matches')}>
-            Matches
           </button>
           <button className={`tab ${tab === 'watched' ? 'active' : ''}`} onClick={() => setTab('watched')}>
             Watched {pendingBans > 0 && <span className="pill">{pendingBans}</span>}
@@ -216,7 +194,6 @@ export default function App(): JSX.Element {
               onSetTeam={setTeam}
             />
           )}
-          {tab === 'matches' && <MatchesScreen refreshToken={matchesRefresh} onOpen={openMatch} onImport={importMatches} />}
           {tab === 'watched' && <WatchedScreen refreshToken={watchedRefresh} />}
           {tab === 'settings' && (
             <SettingsScreen settings={settings} keyStatus={keyStatus} onChange={changeSettings} onKeysChanged={refreshKeys} logs={logs} />

@@ -20,7 +20,7 @@ const teamLabel: Record<Team, string> = { unknown: 'team?', enemy: 'enemy', mine
 function sortValue(p: ScoutPlayer, key: SortKey): number | string {
   switch (key) {
     case 'score':
-      return p.scout.faceitScore !== undefined || p.scout.valveScore !== undefined ? p.scout.score : -1
+      return p.scout.faceitScore !== undefined ? p.scout.score : -1
     case 'elo':
       return p.faceit?.elo ?? -1
     case 'name':
@@ -50,7 +50,7 @@ export function PlayerTable({ players, selectedId, showScore, onSelect, onCycleT
   )
 
   return (
-    <table className="lobby dual">
+    <table className="lobby">
       <thead>
         <tr>
           {header('name', 'Player')}
@@ -86,20 +86,11 @@ export function PlayerTable({ players, selectedId, showScore, onSelect, onCycleT
                       {p.name} {p.isLocal && <span className="tag you">you</span>} {p.watched && <span className="tag watch">watch</span>}
                       {p.steam?.profilePrivate && <span className="tag private">private</span>}
                       {p.identity === 'faceit_name' && <span className="tag unverified" title={identityLabel.faceit_name}>via faceit</span>}
-                      {p.identity === 'leetify_match' && <span className="tag verified" title={identityLabel.leetify_match}>match</span>}
-                      {p.matchStats?.party !== undefined && <span className="tag party" title="Players sharing this number queued together">party {p.matchStats.party}</span>}
                     </div>
                     <div className="player-sub">
                       {p.steamId ?? (faceitStatus === 'pending' ? 'resolving…' : 'Steam ID hidden by server')}
                       {p.steam?.cs2Hours !== undefined && <span className="faint"> · {fmtInt(p.steam.cs2Hours)} h</span>}
                     </div>
-                    {p.matchStats && (
-                      <div className="player-sub mono" title="This match: ADR · HS% · score">
-                        {p.matchStats.adr !== undefined ? `${fmtInt(p.matchStats.adr)} ADR` : ''}
-                        {p.matchStats.headshotPercentage !== undefined ? ` · ${fmtInt(p.matchStats.headshotPercentage)}% HS` : ''}
-                        {` · ${p.matchStats.score} pts`}
-                      </div>
-                    )}
                   </div>
                 </div>
               </td>
